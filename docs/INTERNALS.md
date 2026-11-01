@@ -44,6 +44,7 @@ Plus binds RAM copies over `/bak/p2pcam.sqfs` and `/bak/sensor.sh` from step 1, 
 | 12 | `0x55a4a` | `SO_SNDBUF` was set on the CTP socket instead of the RTSP client socket |
 | 13 | `0x113c00` + 2 call sites | `req_gate`: port 554 shares a dispatcher with CTP/HTTP; non-RTSP requests are accepted only from loopback |
 | 14 | `0x5ef24` | per-frame 300 KiB `memset` in `get_venc_stream` removed (CPU) |
+| 15 | `0x19bae` | `support_ymv` default 1 → 0: vertical tracking |
 
 `bind_lo` and `req_gate` live in the Tange command-handler area, which is dead code once patch 9 is in.
 The local vendor API (`http://127.0.0.1:8001/...`, used by `httpclt`, the panel and `mo.sh`) keeps working.
@@ -100,7 +101,7 @@ plain text.
 | Zone support | `support_mdzone` | 1 at runtime on this camera (`0x3a4ca8`, read from process memory) although neither `hwcfg.ini` nor a `defalut.config` sets it; what sets it is unknown |
 | Real threshold | `[config] motion_level` in `hwcfg.ini`, 0/1/2 | applied once at boot by `0x617bc`: moving blocks needed 15 / 4 / 1 (`md_setting_low/middle/high` override). Missing = 1. Verified live: `motion_level = 2` gives threshold 1 |
 | Level shown to the app | `devParam.dat` 0xe8 = 1/2/3 | only read back for the vendor app |
-| Motion tracking | `devParam.dat` 0x2d8 | while on, the zone check is skipped |
+| Motion tracking | `devParam.dat` 0x2d8 | while on, recording skips the zone check; see Tracking below |
 | Event switches | `devParam.dat` 0x388 motion, 0x38c person, 0x390 sound | 2 = off (static analysis) |
 | Defence, zone state | `devParam.dat` 0x3d4, 0x3d5 | |
 | App event flags | `extraParam.dat` 0x1340–0x134d | `setMotEventStatus` 0x1346 (2 = no recording trigger), `setMotionSensity` 0x134b, `setAreaSensity` 0x1349, … |
@@ -131,7 +132,35 @@ Runtime values can be read without changing anything:
 Debug switches: `touch /tmp/md_info`, `/tmp/md_region`, `/tmp/track_info`, `/tmp/od_info` or
 `/tmp/hd_info` makes `p2pcam` print motion, zone, tracking and person-detection details (not tested yet).
 
+### Tracking
+
+`/dev/ptz` takes three ioctls with an int array: 0x81 range (510 × 160), 0x82 position, 0x83 go to position.
+Numbers below were measured on the camera unless marked static.
+
+- **Dead zone.** `FUN_00060e68` (static) clears dx and dy while the object's centre is in the middle half of the
+  frame. Every measured step sat at or beyond that limit; a step value of 21 is exactly 25 % of the width.
+- **Zones.** Tracking starts only for an event that overlaps a zone (`0x33a24`, static). With a zone on the right
+  all nine steps went right; with the whole frame they went both ways; with a zone at 20–50 % the camera did not
+  move at all. Recording does not wait for this: with tracking on, a clip started for motion outside the zone.
+- **Tilt.** `support_ymv` (default 1, from the absent `defalut.config`) clears dy in `FUN_00033978`. Patch 15 makes
+  the default 0. Tilt then moves only with a pan, because of the dead zone, and `FUN_000399e4` multiplies its step
+  by 7.
+- **Return.** Ten seconds after the last step, `FUN_0003990c` goes back to the position read when tracking started.
+- **Re-reference.** Every 10th return (`ptzAdjustCount`) and 30 minutes after a return, it calls ioctl 0x8a instead:
+  the camera sweeps and lands on the position in `/home/psp.dat`. The argument is `support_ymv != 0`; 1 sweeps pan
+  only, 0 sweeps both axes (measured, about 20 s).
+- **`/home/psp.dat`** is 20 bytes: `PSPT`, then x, y, z and x + y − 176 as i32. The driver rewrites it after a move,
+  and after each tracking return, so tracking adds flash writes. It is read at boot without moving the motors. A
+  drifted value therefore stays hidden until the first re-reference: on our camera that turned the view 57 steps
+  away from the door, and a reboot did not bring it back. Moves made with the panel arrows update the file while
+  tracking is off; during tracking saving is off (ioctl 0x89).
+- A reboot during tracking leaves the camera away from the saved position until the next re-reference (static).
+
 ## Cloud endpoints
+
+`netguard.sh` covers `/home/etc/resolv.conf` (the target of `/etc/resolv.conf`, on flash) with a read-only RAM
+copy. `p2pcam` rewrites that file at boot; before this, DNS pointed at the router for up to 5 s and the file was
+rewritten on flash on every boot.
 
 Seen in the binary: Alibaba HTTPDNS `203.107.1.1/.33/.34/.35`, `139.224.31.65` (log upload),
 `47.107.191.43` (4G speed test), `ep.tange365.com`, `fidistr.tange365.com`, `www.goke-agps.com`.

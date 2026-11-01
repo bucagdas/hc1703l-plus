@@ -7,6 +7,7 @@
 #   GET  gal?dl=1&d=&h=&f=           download a clip (the player uses this too)
 #   POST gal?arm=0|1                 motion e-mail switch: writes <SD>/armed ("1"/"0") for an external mailer
 #   POST gal?del=1&d=&h=&f=&p=       delete an event (clip and/or snapshot+clip link)
+#   POST gal?bulk=1&i=D~H~F~P,...    delete up to 25 events at once (nothing is deleted if one entry is invalid)
 #   POST gal?rmday=DAY               delete all clips and snapshots of a day (never today)
 # Replies: "OK ..." or "ERR code". arm/del/rmday arriving by GET are IGNORED: an old "gal?arm=0" opened from history cannot change anything.
 # Stock /bin/sh: has arithmetic, no cut/tr/wc.
@@ -24,7 +25,7 @@ getp() {
   done
 }
 s=$(getp s); d=$(getp d); h=$(getp h); f=$(getp f); p=$(getp p)
-dl=$(getp dl); arm=$(getp arm); del=$(getp del); rmday=$(getp rmday)
+dl=$(getp dl); arm=$(getp arm); del=$(getp del); rmday=$(getp rmday); bulk=$(getp bulk)
 
 day_ok()  { case "$1" in 20[0-9][0-9]-[01][0-9]-[0-3][0-9]) return 0;; esac; return 1; }
 hour_ok() { case "$1" in [0-2][0-9]) return 0;; esac; return 1; }
@@ -108,7 +109,7 @@ if [ "$s" = list ]; then
 fi
 
 # ---------- CHANGING ACTIONS: POST only ----------
-if [ -n "$arm$del$rmday" ]; then
+if [ -n "$arm$del$rmday$bulk" ]; then
   text
   if [ "$REQUEST_METHOD" != POST ]; then echo "ERR post_only"; exit 0; fi
   if [ -n "$arm" ]; then
@@ -126,6 +127,28 @@ if [ -n "$arm$del$rmday" ]; then
       snap_ok "$p" || { echo "ERR invalid"; exit 0; }
       rm -f "$OUT/$p" "$OUT/${p%.jpg}.clip" && n=$((n+1))
     fi
+    sync; echo "OK $n"; exit 0
+  fi
+  if [ -n "$bulk" ]; then
+    i=$(getp i)
+    case "$i" in ''|*[!A-Za-z0-9._~,-]*) echo "ERR invalid"; exit 0;; esac
+    oifs=$IFS; IFS=,; set -- $i; IFS=$oifs
+    [ $# -le 25 ] || { echo "ERR invalid"; exit 0; }
+    split() { bd=${1%%~*}; r=${1#*~}; bh=${r%%~*}; r=${r#*~}; bf=${r%%~*}; bp=${r#*~}; }
+    for it; do
+      case "$it" in *~*~*~*) ;; *) echo "ERR invalid"; exit 0;; esac
+      split "$it"
+      [ -n "$bf$bp" ] || { echo "ERR invalid"; exit 0; }
+      if [ -n "$bf" ]; then day_ok "$bd" && hour_ok "$bh" && vid_ok "$bf" || { echo "ERR invalid"; exit 0; }; fi
+      if [ -n "$bp" ]; then snap_ok "$bp" || { echo "ERR invalid"; exit 0; }; fi
+    done
+    n=0
+    for it; do
+      split "$it"
+      [ -z "$bf" ] || rm -f "$BASE/$bd/$bh/$bf"
+      [ -z "$bp" ] || rm -f "$OUT/$bp" "$OUT/${bp%.jpg}.clip"
+      n=$((n+1))
+    done
     sync; echo "OK $n"; exit 0
   fi
   if [ -n "$rmday" ]; then
@@ -184,6 +207,13 @@ h3{font-size:13px;font-weight:600;color:var(--muted);margin:18px 0 8px;text-tran
 .info b{font-variant-numeric:tabular-nums}
 .info small{color:var(--muted)}
 .acts{display:flex;gap:6px;padding:0 10px 10px;flex-wrap:wrap}
+.tick{position:absolute;top:8px;left:8px;width:26px;height:26px;border-radius:7px;border:2px solid #fff;background:rgba(0,0,0,.45);color:#fff;font-size:16px;line-height:1;display:none;align-items:center;justify-content:center}
+body.selecting .tick{display:flex}
+body.selecting .acts,body.selecting .thumb .play{display:none}
+.event.picked{outline:2px solid var(--accent);outline-offset:-2px}
+.event.picked .tick{background:var(--accent);border-color:var(--accent)}
+.event.picked .tick::after{content:'\2713'}
+#selcount{font-size:14px;font-variant-numeric:tabular-nums}
 .acts button,.acts .btn{min-height:32px;padding:4px 10px;font-size:13px}
 .empty{color:var(--muted);padding:24px 0}
 #state{font-size:13px;min-height:18px}
@@ -208,7 +238,7 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
 </header>
 <main>
   <div id="days" role="tablist"></div>
-  <div class="head"><h2 id="heading"></h2><div class="right"><span id="state" role="status" aria-live="polite"></span><button id="rmday" class="danger" type="button" data-i18n="rmday" hidden>Delete this day</button></div></div>
+  <div class="head"><h2 id="heading"></h2><div class="right"><span id="state" role="status" aria-live="polite"></span><span id="selbar" class="right" hidden><span id="selcount"></span><button id="selall" type="button"></button><button id="seldel" class="danger" type="button" data-i18n="sel_del" disabled>Delete selected</button><button id="selcancel" type="button" data-i18n="sel_cancel">Cancel</button></span><button id="selbtn" type="button" data-i18n="sel_start" hidden>Select</button><button id="rmday" class="danger" type="button" data-i18n="rmday" hidden>Delete this day</button></div></div>
   <div id="list"></div>
 </main>
 <dialog id="player">
@@ -230,6 +260,8 @@ en:{title:'Recordings',reading:'Reading…',mail:'Motion e-mail:',panel:'Camera 
  downloading:'Downloading the clip ({0})…',preparing:'Preparing…',no_video:'the clip has no video track',convert:'could not convert',
  cant_play:'This browser could not play the clip (HEVC/H.265). Use Safari or Download and open it in VLC.',play_err:'Could not play: {0}. Download it and open it in VLC.',
  p_note:'{0}{1}audio not played (video only)',sec:'s',
+ sel_start:'Select',sel_cancel:'Cancel',sel_del:'Delete selected',sel_all:'Select all',sel_none:'Clear selection',sel_n:'{0} selected',
+ c_bulk:'Permanently delete {0} events? Their clips and snapshots will be removed. This cannot be undone.',bulk_prog:'Deleting {0} / {1}…',bulk_done:'{0} events deleted',
  ERR_post_only:'only from the buttons',ERR_invalid:'invalid request',ERR_sd_write:'cannot write to the SD card',ERR_today:'today cannot be deleted',
  months:['January','February','March','April','May','June','July','August','September','October','November','December'],
  wdays:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']},
@@ -243,6 +275,8 @@ tr:{title:'Kayıtlar',reading:'Okunuyor…',mail:'Hareket maili:',panel:'Kamera 
  downloading:'Video indiriliyor ({0})…',preparing:'Hazırlanıyor…',no_video:'videoda görüntü izi yok',convert:'dönüştürülemedi',
  cant_play:'Bu tarayıcı videoyu oynatamadı (HEVC/H.265). Safari kullanın ya da İndir ile VLC\'de açın.',play_err:'Oynatılamadı: {0}. İndir ile VLC\'de açabilirsiniz.',
  p_note:'{0}{1}ses çalınmaz (yalnız görüntü)',sec:'sn',
+ sel_start:'Seç',sel_cancel:'Vazgeç',sel_del:'Seçilenleri sil',sel_all:'Tümünü seç',sel_none:'Seçimi temizle',sel_n:'{0} seçili',
+ c_bulk:'{0} olay kalıcı olarak silinsin mi? Videoları ve fotoğrafları kaldırılır. Bu geri alınamaz.',bulk_prog:'Siliniyor {0} / {1}…',bulk_done:'{0} olay silindi',
  ERR_post_only:'yalnız düğmelerle',ERR_invalid:'geçersiz istek',ERR_sd_write:'SD karta yazılamadı',ERR_today:'bugün silinemez',
  months:['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'],
  wdays:['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi']}};
@@ -254,7 +288,7 @@ function arr(k){return L[lang][k]||L.en[k]}
 var $=function(s){return document.querySelector(s)};
 var sel=new URLSearchParams(location.search).get('d')||'';
 if(!/^\d{4}-\d{2}-\d{2}$/.test(sel))sel='';
-var today='',armed=null,dayInfo={},lastData=null;
+var today='',armed=null,dayInfo={},lastData=null,selecting=false,picked={};
 function dec(n){return lang==='tr'?String(n).replace('.',','):String(n)}
 function dayName(g,short){var a=g.split('-'),d=new Date(+a[0],+a[1]-1,+a[2]),m=arr('months')[+a[1]-1];
   if(short)return lang==='tr'?(+a[2])+' '+m.slice(0,3):m.slice(0,3)+' '+(+a[2]);
@@ -276,7 +310,7 @@ document.querySelectorAll('[data-lang]').forEach(function(b){b.onclick=function(
 
 function load(){
   state(t('reading'));
-  fetch('gal?s=list'+(sel?'&d='+sel:''),{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
+  return fetch('gal?s=list'+(sel?'&d='+sel:''),{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
     var d={days:[],events:[],total:null,sd:[0,1]};
     x.split('\n').forEach(function(s){
       var a=s.split('|');
@@ -313,9 +347,9 @@ function drawDays(days){
     if(g.g===sel)b.className='on';
     b.onclick=function(){pick(g.g)};k.appendChild(b);
   });
-  var r=$('#rmday');r.hidden=!sel;r.disabled=(sel===today);r.title=sel===today?t('today_locked'):'';
+  var r=$('#rmday');r.hidden=!sel||selecting;r.disabled=(sel===today);r.title=sel===today?t('today_locked'):'';
 }
-function pick(g){sel=g;try{history.replaceState(null,'',g?'?d='+g:location.pathname)}catch(e){}
+function pick(g){setSelecting(false);sel=g;try{history.replaceState(null,'',g?'?d='+g:location.pathname)}catch(e){}
   $('#heading').textContent=g?dayName(g):t('latest');load()}
 
 function card(o,withDay){
@@ -324,7 +358,14 @@ function card(o,withDay){
   if(o.p){var i=document.createElement('img');i.loading='lazy';i.alt='';i.src='/'+o.p;r.appendChild(i)}
   else{var y=document.createElement('div');y.className='none';y.textContent=t('no_photo');r.appendChild(y)}
   if(o.f){var e=document.createElement('span');e.className='play';e.textContent=t('play');r.appendChild(e)}
-  r.onclick=function(){o.f?play(o):photo(o)};
+  var tk=document.createElement('span');tk.className='tick';r.appendChild(tk);
+  var id=key(o);d.classList.toggle('picked',!!picked[id]);
+  r.onclick=function(){
+    if(!selecting){o.f?play(o):photo(o);return}
+    if(picked[id])delete picked[id];else picked[id]=o;
+    d.classList.toggle('picked',!!picked[id]);r.setAttribute('aria-pressed',picked[id]?'true':'false');selUi();
+  };
+  if(selecting)r.setAttribute('aria-pressed',picked[id]?'true':'false');
   var when=o.f?hms(o.f.slice(9,15)):hms(o.p.slice(12,18));
   var info=document.createElement('div');info.className='info';
   var bb=document.createElement('b');bb.textContent=when;
@@ -345,6 +386,10 @@ function card(o,withDay){
 }
 function drawList(events){
   var l=$('#list');l.textContent='';
+  var live={};events.forEach(function(o){live[key(o)]=o});
+  Object.keys(picked).forEach(function(k){if(!live[k])delete picked[k]});
+  if(!events.length)setSelecting(false);
+  $('#selbtn').hidden=selecting||!events.length;selUi();
   if(!events.length){var p=document.createElement('p');p.className='empty';p.textContent=t('no_rec');l.appendChild(p);return}
   if(!sel){var g=document.createElement('div');g.className='grid';events.forEach(function(o){g.appendChild(card(o,true))});l.appendChild(g);return}
   var cur=null,grid=null,count={};
@@ -354,6 +399,39 @@ function drawList(events){
     grid.appendChild(card(o,false));
   });
 }
+function key(o){return [o.g,o.h,o.f||'',o.p||''].join('~')}
+function selUi(){
+  var n=Object.keys(picked).length,all=lastData?lastData.events.length:0;
+  $('#selcount').textContent=t('sel_n',n);$('#seldel').disabled=!n;
+  $('#selall').textContent=t(n&&n===all?'sel_none':'sel_all');
+}
+function setSelecting(on){
+  selecting=on;if(!on)picked={};
+  document.body.classList.toggle('selecting',on);
+  $('#selbar').hidden=!on;$('#selbtn').hidden=on||!(lastData&&lastData.events.length);
+  document.querySelectorAll('.event.picked').forEach(function(e){if(!on)e.classList.remove('picked')});
+  var r=$('#rmday');r.hidden=!sel||on;
+  selUi();
+}
+$('#selbtn').onclick=function(){setSelecting(true);state('')};
+$('#selcancel').onclick=function(){setSelecting(false)};
+$('#selall').onclick=function(){
+  var all=lastData.events,n=Object.keys(picked).length;
+  picked={};if(!(n&&n===all.length))all.forEach(function(o){picked[key(o)]=o});
+  drawList(all);
+};
+$('#seldel').onclick=function(){
+  var keys=Object.keys(picked),done=0;if(!keys.length)return;
+  if(!confirm(t('c_bulk',keys.length)))return;
+  $('#seldel').disabled=true;
+  function next(){
+    if(!keys.length){setSelecting(false);return load()}
+    var part=keys.splice(0,25);
+    state(t('bulk_prog',done,done+part.length+keys.length));
+    return post('gal?bulk=1&i='+part.join(',')).then(function(){done+=part.length;return next()});
+  }
+  next().then(function(){state(t('bulk_done',done),'good')}).catch(function(e){state(t('del_err',e.message),'bad');setSelecting(false);load()});
+};
 $('#rmday').onclick=function(){
   var g=dayInfo[sel];if(!g)return;
   if(!confirm(t('c_rmday',dayName(sel),g.clips,g.snaps)))return;

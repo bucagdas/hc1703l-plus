@@ -28,7 +28,8 @@ Ayrıca:
   sekme komutu tekrar çalıştırmaz. İngilizce ve Türkçe (başlıktaki EN/TR anahtarı; galeri
   panelin seçimini izler).
 - **Kayıt galerisi** (`:8090`): hareket olayları kart olarak (fotoğraf + klip), gün görünümü, tarayıcıda
-  oynatma, indirme, silme, bir günü toplu silme, harici bir mail betiği için hareket maili anahtarı.
+  oynatma, indirme, silme, birden çok olayı seçip birlikte silme, bir günü toplu silme, harici bir mail betiği
+  için hareket maili anahtarı.
 - **Hareket ayarları** panelde: hassasiyet, takip ve canlı önizleme üzerinde çizilen en çok 25 alarm
   bölgesi. Açılışta RAM'den uygulanır, bunlar da flash'a dokunmaz.
 - **Hareket fotoğrafları** (`mo.sh`): her hareket klibi için bir fotoğraf, klibe bağlı.
@@ -54,7 +55,8 @@ health.sh  T+0 plus.sh (panel, galeri, hareket servisi)
            T+30 dk hâlâ sağlıklıysa başarısızlık sayaçlarını siler
 ```
 
-Plus flash'a hiç yazmaz. SD kartı çıkarmak ya da içinden `debug_cmd.sh`'yi silmek, bir sonraki açılışta
+Plus flash'a hiç yazmaz. Stok PTZ sürücüsü ise yazar: hareketten sonra ve her takip dönüşünde kamera konumunu
+`/home/psp.dat` dosyasına kaydeder. SD kartı çıkarmak ya da içinden `debug_cmd.sh`'yi silmek, bir sonraki açılışta
 sizi düz temel hack'e döndürür. Panelden yapılan yeniden başlatma başarısız açılış sayılmaz; art arda ayar
 değiştirmek kamerayı stoğa düşürmez.
 
@@ -73,7 +75,7 @@ değiştirmek kamerayı stoğa düşürmez.
    `http://<kamera>:8080` çalışıyor mu kontrol edin.
 2. Kameradan `/bak/p2pcam.sqfs` dosyasını bilgisayarınıza alın (FTP).
 3. Derleyin: `patcher/build.sh p2pcam.sqfs out/`. Yamalı `p2pcam` md5 değeri
-   `a34010b654e0b9bd53a2a231f228bd3b` olmalı.
+   `018f4c40708d3a2b3ba0a26343ab0f14` olmalı.
 4. SD kartın köküne kopyalayın: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` ve `out/p2pcam.md5` dosyalarını `clean/` içine koyun.
    **`debug_cmd.sh`'yi henüz kopyalamayın.**
@@ -111,7 +113,13 @@ değiştirmek kamerayı stoğa düşürmez.
 - Tek kamerada denendi.
 - Hareket ayarları yeniden başlatınca geçerli olur: çalışırken değiştirmenin tek yolu kapalı olan bulut
   işleyicisi.
-- Takip açıkken kamera alarm bölgelerini yok sayar.
+- Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ
+  çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.
+- Takip, görüntünün orta yarısındaki kişiyi izlemez; kameraya tam önden yaklaşan kişi izlenmez. Dikey hareket
+  yalnız yatay dönüşle birlikte ve büyük adımlarla olur.
+- Her 10. dönüşte ve bir dönüşten 30 dakika sonra kamera, referansını bulmak için yaklaşık 20 sn tarama yapar ve
+  kayıtlı konuma gider. İlk seferde başka yere düşerse takibi kapatın, panel oklarıyla ayarlayın, takibi yeniden
+  açın.
 - HTTPS yok (BusyBox httpd), bu yüzden panel çift yönlü ses için tarayıcı mikrofonunu kullanamaz.
 
 ## Teşekkür ve lisans

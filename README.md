@@ -27,7 +27,8 @@ Plus also adds:
   Commands are POST-only, so reloading the page or restoring a tab never re-runs a command. English and
   Turkish (EN/TR switch in the header; the gallery follows the panel's choice).
 - **Recordings gallery** on `:8090`: motion events as cards (snapshot + clip), per-day view, in-browser
-  playback, download, delete, delete a whole day, a motion e-mail switch for an external mailer.
+  playback, download, delete, select several events and delete them together, delete a whole day, a motion
+  e-mail switch for an external mailer.
 - **Motion settings** in the panel: sensitivity, tracking and up to 25 alarm zones drawn on the live
   preview. Applied from RAM at boot, so they do not touch flash either.
 - **Motion snapshots** (`mo.sh`): one snapshot per motion clip, linked to it.
@@ -53,7 +54,8 @@ health.sh  T+0 plus.sh (panel, gallery, motion service)
            T+30 min still healthy → clear the failure counters
 ```
 
-Plus never writes to flash. Removing the SD card, or deleting `debug_cmd.sh` from it, gives you the plain
+Plus never writes to flash. The stock PTZ driver still does: it saves the camera position to `/home/psp.dat`
+after a move, and after every tracking return. Removing the SD card, or deleting `debug_cmd.sh` from it, gives you the plain
 base hack on the next boot. A reboot from the panel does not count as a failed boot, so several setting changes
 in a row do not drop the camera to stock.
 
@@ -71,7 +73,7 @@ in a row do not drop the camera to stock.
    Check that telnet, FTP and `http://<camera>:8080` work.
 2. Copy `/bak/p2pcam.sqfs` from the camera to your computer (FTP).
 3. Build: `patcher/build.sh p2pcam.sqfs out/`. The patched `p2pcam` md5 must be
-   `a34010b654e0b9bd53a2a231f228bd3b`.
+   `018f4c40708d3a2b3ba0a26343ab0f14`.
 4. Copy to the SD card root: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    Put `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` and `out/p2pcam.md5` into `clean/`.
    **Do not copy `debug_cmd.sh` yet.**
@@ -107,7 +109,13 @@ in a row do not drop the camera to stock.
 - One firmware build only. Other builds need new offsets.
 - Tested on one camera.
 - Motion settings need a reboot to take effect: the only runtime path is the disabled cloud handler.
-- While tracking is on, the camera ignores alarm zones.
+- With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once that motion
+  reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.
+- Tracking does not follow someone in the middle half of the frame, so a person walking straight at the camera
+  is not followed. Tilt moves only together with a pan, in large steps.
+- Every 10th return, and 30 minutes after a return, the camera sweeps for about 20 s to find its reference and
+  goes to the saved position. If it lands somewhere else the first time, turn tracking off, aim it with the panel
+  arrows, and turn tracking on again.
 - No HTTPS (BusyBox httpd), so the panel cannot use the browser microphone for two-way audio.
 
 ## Credits and license

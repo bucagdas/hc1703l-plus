@@ -29,5 +29,5 @@ mksquashfs "$T/root" "$OUT/p2pcam.sqfs" -comp xz -b 131072 -noappend -no-xattrs 
 md5 "$T/b" > "$OUT/p2pcam.md5"
 md5 "$OUT/p2pcam.sqfs" > "$OUT/p2pcam.sqfs.md5"
 cp "$T/patch.log" "$OUT/patch.log"
-echo "patched p2pcam md5: $(cat "$OUT/p2pcam.md5")  (reference build: a34010b654e0b9bd53a2a231f228bd3b)"
+echo "patched p2pcam md5: $(cat "$OUT/p2pcam.md5")  (reference build: 018f4c40708d3a2b3ba0a26343ab0f14)"
 echo "written to $OUT/ - copy p2pcam.sqfs, p2pcam.sqfs.md5 and p2pcam.md5 to <SD>/clean/"

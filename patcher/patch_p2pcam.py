@@ -71,5 +71,7 @@ for a,o,n in [(351928, 'fff7daf8', 'bdf0a2fe'), (352388, 'fef7f4ff', 'bdf0bcfd')
     code(a,bytes.fromhex(o),bytes.fromhex(n),'request read -> req_gate')
 # 14) get_venc_stream: drop the per-frame 300 KiB memset; the copy below only uses len bytes (CPU)
 code(0x5ef24,bytes.fromhex('b7f79ce8'),bytes.fromhex('aff30080'),'get_venc_stream memset -> nop.w')
+# 15) Vertical tracking: support_ymv defaults to 1, which drops dy. Nothing on this camera sets it (no defalut.config).
+code(0x19bae,bytes.fromhex('0121'),bytes.fromhex('0021'),'support_ymv default 1->0')
 open(dst,'wb').write(b)
 print('sha256',hashlib.sha256(b).hexdigest())

@@ -9,6 +9,13 @@ p=; read p < $PF 2>/dev/null
 if [ -n "$p" ] && kill -0 "$p" 2>/dev/null && grep -q netguard /proc/$p/cmdline 2>/dev/null; then exit 0; fi
 echo $$ > $PF
 trap '' HUP
+# /etc/resolv.conf links to a file on flash. Cover it with a read-only RAM copy: nothing can write to flash
+# here any more, and p2pcam cannot point DNS at the router for the seconds before the loop below corrects it.
+RC=/home/etc/resolv.conf
+if [ -f $RC ] && ! grep -q " $RC " /proc/mounts; then
+  echo 'nameserver 127.0.0.1' > /tmp/resolv.plus &&
+    mount --bind /tmp/resolv.plus $RC && mount -o remount,ro,bind $RC
+fi
 n=0
 while :; do
   route add -net 0.0.0.0 netmask 128.0.0.0 reject 2>/dev/null

@@ -44,6 +44,7 @@ Plus, 1. adımda `/bak/p2pcam.sqfs` ve `/bak/sensor.sh` üzerine RAM kopyaları 
 | 12 | `0x55a4a` | `SO_SNDBUF` RTSP istemci soketi yerine CTP soketine veriliyordu |
 | 13 | `0x113c00` + 2 çağrı | `req_gate`: 554, CTP/HTTP ile aynı dağıtıcıyı paylaşır; RTSP dışı istek yalnız loopback'ten kabul edilir |
 | 14 | `0x5ef24` | `get_venc_stream` içindeki kare başına 300 KiB `memset` kaldırıldı (CPU) |
+| 15 | `0x19bae` | `support_ymv` varsayılanı 1 → 0: dikey takip |
 
 `bind_lo` ve `req_gate`, 9. yamadan sonra ölü kod olan Tange komut işleyicisi alanında durur. Yerel
 üretici API'si (`http://127.0.0.1:8001/...`; `httpclt`, panel ve `mo.sh` kullanır) çalışmaya devam eder.
@@ -99,7 +100,7 @@ dosyayı `*_bak`'a kopyalar. `devParam.dat` WiFi SSID'sini (+0x100) ve parolası
 | Bölge desteği | `support_mdzone` | Bu kamerada çalışırken 1 (`0x3a4ca8`, süreç belleğinden okundu); oysa ne `hwcfg.ini` ne de bir `defalut.config` bunu ayarlıyor. Neyin ayarladığı bilinmiyor |
 | Gerçek eşik | `hwcfg.ini` içinde `[config] motion_level`, 0/1/2 | açılışta bir kez `0x617bc` uygular: gereken hareketli blok 15 / 4 / 1 (`md_setting_low/middle/high` ile değişir). Yoksa 1. Canlı doğrulandı: `motion_level = 2` eşiği 1 yapar |
 | Uygulamaya gösterilen seviye | `devParam.dat` 0xe8 = 1/2/3 | yalnız üretici uygulamasına geri bildirilir |
-| Hareket takibi | `devParam.dat` 0x2d8 | açıkken bölge denetimi atlanır |
+| Hareket takibi | `devParam.dat` 0x2d8 | açıkken kayıt bölge denetimini atlar; ayrıntı için aşağıda Takip |
 | Olay anahtarları | `devParam.dat` 0x388 hareket, 0x38c kişi, 0x390 ses | 2 = kapalı (statik analiz) |
 | Savunma, bölge durumu | `devParam.dat` 0x3d4, 0x3d5 | |
 | Uygulama olay bayrakları | `extraParam.dat` 0x1340–0x134d | `setMotEventStatus` 0x1346 (2 = kayıt tetiklenmez), `setMotionSensity` 0x134b, `setAreaSensity` 0x1349, … |
@@ -131,7 +132,35 @@ Hata ayıklama anahtarları: `touch /tmp/md_info`, `/tmp/md_region`, `/tmp/track
 `/tmp/hd_info`, `p2pcam`'in hareket, bölge, takip ve kişi algılama ayrıntısını yazdırmasını sağlar
 (henüz denenmedi).
 
+### Takip
+
+`/dev/ptz` tamsayı dizisiyle üç ioctl alır: 0x81 aralık (510 × 160), 0x82 konum, 0x83 konuma git. Statik diye
+belirtilmeyen sayılar kamerada ölçüldü.
+
+- **Ölü bölge.** `FUN_00060e68` (statik), nesnenin merkezi görüntünün orta yarısındayken dx ve dy'yi sıfırlar.
+  Ölçülen bütün adımlar bu sınırda ya da dışındaydı; 21 adım değeri tam olarak genişliğin %25'idir.
+- **Bölgeler.** Takip yalnız bölgeyle kesişen olayla başlar (`0x33a24`, statik). Bölge sağdayken dokuz adımın hepsi
+  sağa gitti; bütün karede iki yöne de gitti; %20–50 bölgesinde kamera hiç kıpırdamadı. Kayıt bunu beklemez: takip
+  açıkken bölge dışındaki hareket için de klip başladı.
+- **Dikey.** `support_ymv` (varsayılan 1, bu kamerada olmayan `defalut.config`'den okunur) `FUN_00033978` içinde
+  dy'yi sıfırlar. 15. yama varsayılanı 0 yapar. Dikey hareket, ölü bölge yüzünden yalnız yatay dönüşle birlikte olur
+  ve `FUN_000399e4` adımını 7 ile çarpar.
+- **Dönüş.** Son adımdan on saniye sonra `FUN_0003990c`, takip başlarken okunan konuma döner.
+- **Yeniden hizalama.** Her 10. dönüşte (`ptzAdjustCount`) ve bir dönüşten 30 dakika sonra bunun yerine ioctl 0x8a
+  çağrılır: kamera tarama yapar ve `/home/psp.dat` içindeki konuma gider. Argüman `support_ymv != 0`'dır; 1 yalnız
+  yatayı, 0 iki ekseni tarar (ölçüldü, yaklaşık 20 sn).
+- **`/home/psp.dat`** 20 bayttır: `PSPT`, ardından i32 olarak x, y, z ve x + y − 176. Sürücü dosyayı hareketten sonra
+  ve her takip dönüşünde yeniden yazar; yani takip flash yazımını artırır. Açılışta motorlar oynatılmadan okunur.
+  Bu yüzden kaymış bir değer ilk yeniden hizalamaya kadar görünmez: bizim kamerada bu, görüşü kapıdan 57 adım
+  uzağa çevirdi ve yeniden başlatma geri getirmedi. Takip kapalıyken panel oklarıyla yapılan hareket dosyayı
+  günceller; takip sırasında kayıt kapalıdır (ioctl 0x89).
+- Takip sırasında yeniden başlatma, kamerayı bir sonraki hizalamaya kadar kayıtlı konumdan uzakta bırakır (statik).
+
 ## Bulut uç noktaları
+
+`netguard.sh`, `/home/etc/resolv.conf` dosyasını (`/etc/resolv.conf` buraya bağlı, flash'ta) salt okunur bir RAM
+kopyasıyla örter. `p2pcam` açılışta bu dosyayı yeniden yazar; bundan önce DNS en çok 5 sn router'ı gösteriyor ve
+dosya her açılışta flash'ta yeniden yazılıyordu.
 
 İkilide görülenler: Alibaba HTTPDNS `203.107.1.1/.33/.34/.35`, `139.224.31.65` (log yükleme),
 `47.107.191.43` (4G hız testi), `ep.tange365.com`, `fidistr.tange365.com`, `www.goke-agps.com`.
