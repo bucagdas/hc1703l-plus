@@ -114,6 +114,10 @@ How a clip starts: the event thread (`0x340e4`) receives motion events; with `su
 does not overlap a zone is dropped (`0x33a24`) unless tracking is on. A surviving event calls `FUN_00033218(1)`,
 which starts a 30 s event recording (`FUN_001d5a9e(0,2,0x1e)`). Zone count −1 means the whole frame.
 
+Walk test with one zone: a person moving outside the zone for minutes produced no clip, and a clip started within
+seconds of entering it, twice. Before entering, not a single event had reached `0x33a24` (its first-call flag
+`0x3a86a4` stayed set), so outside motion may be filtered earlier than the code above. The exact place is unknown.
+
 At runtime only the Tange command handler (`TCI_CMD_SETMOTIONDETECT`, `SET_MOTION_TRACKER_REQ`,
 `SET_MDAREA_STATE`, `SET_DEFENCE_REQ`) changes these, and it is disabled here. Plus therefore applies them at
 boot, before `p2pcam` starts: `debug_cmd.sh` runs `clean/bin/mdcfg` (source `tools/mdcfg.c`) to build a RAM copy

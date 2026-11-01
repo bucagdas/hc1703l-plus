@@ -113,6 +113,10 @@ Klip nasıl başlar: olay iş parçacığı (`0x340e4`) hareket olaylarını al�
 kesişmeyen olay atılır (`0x33a24`), takip açıksa bu denetim atlanır. Geçen olay `FUN_00033218(1)`'i çağırır, o da
 30 sn'lik olay kaydını başlatır (`FUN_001d5a9e(0,2,0x1e)`). Bölge sayısı −1 bütün kare demektir.
 
+Tek bölgeyle yürüyüş testi: bölge dışında dakikalarca hareket eden kişi klip üretmedi, bölgeye girince saniyeler
+içinde klip başladı (iki kez). Girmeden önce `0x33a24`'e hiç olay ulaşmamıştı (ilk çağrı bayrağı `0x3a86a4` set
+kaldı); yani dışarıdaki hareket yukarıdaki koddan daha önce süzülüyor olabilir. Tam yeri bilinmiyor.
+
 Çalışırken bunları yalnız Tange komut işleyicisi değiştirir (`TCI_CMD_SETMOTIONDETECT`,
 `SET_MOTION_TRACKER_REQ`, `SET_MDAREA_STATE`, `SET_DEFENCE_REQ`) ve o burada kapalıdır. Bu yüzden Plus ayarları
 açılışta, `p2pcam` başlamadan uygular: `debug_cmd.sh`, `clean/bin/mdcfg` (kaynak `tools/mdcfg.c`) ile
