@@ -268,12 +268,15 @@ h1{font-size:17px;margin:0}
 #msg{font-size:13px;min-height:18px;max-width:100%;overflow-wrap:anywhere}
 #msg.good{color:var(--good)} #msg.bad{color:var(--bad)}
 .lang button{min-height:30px;padding:3px 9px;font-size:12px}
-main{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:start}
-.bottom{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;min-width:0}
+main{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:stretch}
+.bottom{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:stretch;min-width:0}
 .bottom .wide{grid-column:1/-1}
-@media (max-width:1040px){.bottom{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:1040px){.bottom{grid-template-columns:repeat(2,minmax(0,1fr))}.bottom>.card:nth-child(3){grid-column:1/-1}}
 @media (max-width:780px){main{grid-template-columns:1fr;padding:12px}.bottom{grid-template-columns:minmax(0,1fr)}}
-.col{display:grid;gap:16px;min-width:0}
+@media (max-width:360px){.copy{flex-wrap:wrap}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.col>.card:last-child{flex:1}
+.card.live{display:flex;flex-direction:column}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
 h3{font-size:13px;font-weight:600;margin:16px 0 8px}
@@ -291,7 +294,7 @@ button:active,button.on{background:var(--accent);border-color:var(--accent);colo
 button.danger{color:var(--bad)}
 button.danger:active{color:#fff;background:var(--bad);border-color:var(--bad)}
 .row{display:flex;flex-wrap:wrap;gap:8px}
-.ptz-wrap{display:flex;justify-content:center;margin-top:12px}
+.ptz-wrap{display:flex;justify-content:center;align-items:center;flex:1;margin-top:12px}
 .ptz{display:grid;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(3,50px);gap:6px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .ptz button{padding:0;font-size:20px;touch-action:none}
 .ptz span{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
@@ -300,7 +303,7 @@ dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0;f
 dt{color:var(--muted)}
 dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 dd.good{color:var(--good)} dd.bad{color:var(--bad)}
-input[readonly]{font:13px ui-monospace,Menlo,monospace;width:100%;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+input[readonly]{font:12px ui-monospace,Menlo,monospace;width:100%;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
 .copy{display:flex;gap:8px;margin-top:6px}
 a{color:var(--accent)}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;max-height:360px;overflow:auto;background:var(--bg);padding:10px;border-radius:6px;margin:10px 0 0}
@@ -320,7 +323,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
 </header>
 <main>
   <div class="col">
-    <section class="card">
+    <section class="card live">
       <h2 data-i18n="live">Live preview</h2>
       <div id="pvwrap"><img id="preview" alt="" data-i18n-alt="preview_alt"><div id="zonebox" hidden></div></div>
       <div class="under"><span id="pstate" data-i18n="connecting">Connecting…</span><span class="row"><button id="zgrid" type="button" hidden></button><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></span></div>
