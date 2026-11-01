@@ -1,0 +1,406 @@
+#!/bin/sh
+# HC1703L-GAL-V2  HC1703L Plus recordings gallery. MIT License.
+# Event = motion clip (+ the snapshot taken by mo.sh, paired through the relative path in motion/mo_*.clip).
+# Endpoints:
+#   GET  gal                         page (static; data is fetched by JS)
+#   GET  gal?s=list[&d=DAY]          status + days + events (text, | separated)
+#   GET  gal?dl=1&d=&h=&f=           download a clip (the player uses this too)
+#   POST gal?arm=0|1                 motion e-mail switch: writes <SD>/armed ("1"/"0") for an external mailer
+#   POST gal?del=1&d=&h=&f=&p=       delete an event (clip and/or snapshot+clip link)
+#   POST gal?rmday=DAY               delete all clips and snapshots of a day (never today)
+# Replies: "OK ..." or "ERR code". arm/del/rmday arriving by GET are IGNORED: an old "gal?arm=0" opened from history cannot change anything.
+# Stock /bin/sh: has arithmetic, no cut/tr/wc.
+BASE=/tmp/mnt/mmc01/0
+OUT=$BASE/motion
+ARMF=$BASE/armed
+q="$QUERY_STRING"
+
+getp() {
+  rest="$q"
+  while [ -n "$rest" ]; do
+    kv="${rest%%&*}"
+    case "$rest" in *"&"*) rest="${rest#*&}";; *) rest="";; esac
+    case "$kv" in "$1="*) echo "${kv#*=}"; return;; esac
+  done
+}
+s=$(getp s); d=$(getp d); h=$(getp h); f=$(getp f); p=$(getp p)
+dl=$(getp dl); arm=$(getp arm); del=$(getp del); rmday=$(getp rmday)
+
+day_ok()  { case "$1" in 20[0-9][0-9]-[01][0-9]-[0-3][0-9]) return 0;; esac; return 1; }
+hour_ok() { case "$1" in [0-2][0-9]) return 0;; esac; return 1; }
+vid_ok()  { case "$1" in *..*|*/*|*[!A-Za-z0-9._-]*) return 1;; 20*.mp4) return 0;; esac; return 1; }
+snap_ok() { case "$1" in *..*|*/*|*[!A-Za-z0-9._-]*) return 1;; mo_*.jpg) return 0;; esac; return 1; }
+text() { echo "Content-type: text/plain; charset=utf-8"; echo "Cache-Control: no-store"; echo ""; }
+
+# ---------- CLIP DOWNLOAD (GET, no side effects) ----------
+if [ -n "$dl" ]; then
+  if day_ok "$d" && hour_ok "$h" && vid_ok "$f" && [ -f "$BASE/$d/$h/$f" ]; then
+    echo "Content-type: video/mp4"
+    echo "Content-Disposition: attachment; filename=\"$f\""
+    echo ""
+    cat "$BASE/$d/$h/$f"
+    exit 0
+  fi
+  text; echo "not found"; exit 0
+fi
+
+# ---------- LIST ----------
+list() {
+  lim=$1
+  T=/tmp/gal.$$
+  day_ok "$d" || d=
+  {
+    echo "#K"; grep -H . "$OUT"/mo_*.clip 2>/dev/null
+    echo "#V"; ls -l "$BASE"/20[0-9][0-9]-*/[0-2][0-9]/*.mp4 2>/dev/null
+    echo "#P"; ls -1 "$OUT"/mo_*.jpg 2>/dev/null
+  } | awk -v day="$d" -v base="$BASE/" '
+    BEGIN { bl = length(base) }
+    /^#K$/ { sec = "K"; next }
+    /^#V$/ { sec = "V"; next }
+    /^#P$/ { sec = "P"; next }
+    { sub(/\r$/, "") }
+    sec == "K" {
+      i = index($0, ":"); if (!i) next
+      n = split(substr($0, 1, i - 1), a, "/"); ph = a[n]; sub(/\.clip$/, ".jpg", ph)
+      c2p[substr($0, i + 1)] = ph; next
+    }
+    sec == "V" {
+      sz = $5; pth = $NF
+      if (substr(pth, 1, bl) != base) next
+      rel = substr(pth, bl + 1); if (split(rel, a, "/") != 3) next
+      dy = a[1]; hr = a[2]; fl = a[3]
+      ph = c2p[rel]; if (ph != "") used[ph] = 1
+      vc[dy]++; by[dy] += sz; tv++
+      if (day == "" || day == dy)
+        printf "E%s%s\tevent|%s|%s|%s|%.0f|%s\n", substr(fl, 1, 8), substr(fl, 10, 6), dy, hr, fl, sz, ph
+      next
+    }
+    sec == "P" {
+      n = split($0, a, "/"); ph = a[n]
+      t = substr(ph, 4, 8); ss = substr(ph, 13, 6)
+      dy = substr(t, 1, 4) "-" substr(t, 5, 2) "-" substr(t, 7, 2)
+      pa[dy]++; tp++
+      if (ph in used) next
+      po[dy]++
+      if (day == "" || day == dy)
+        printf "E%s%s\tevent|%s|%s||0|%s\n", t, ss, dy, substr(ss, 1, 2), ph
+      next
+    }
+    END {
+      for (dy in vc) g[dy] = 1
+      for (dy in pa) g[dy] = 1
+      for (dy in g)
+        printf "G%s\tday|%s|%d|%d|%d|%.0f\n", dy, dy, vc[dy] + po[dy], vc[dy], pa[dy], by[dy]
+      printf "T\ttotal|%d|%d\n", tv, tp
+    }' > $T
+  a=; read a < "$ARMF" 2>/dev/null; [ "$a" = 0 ] || a=1
+  echo "status|$a|$(df -k "$BASE" | awk 'NR==2{print $3 "|" $2}')|$(date +%Y-%m-%d)"
+  grep '^T' $T | awk 'BEGIN{FS="\t"}{print $2}'
+  grep '^G' $T | sort -r | awk 'BEGIN{FS="\t"}{print $2}'
+  grep '^E' $T | sort -r | head -n "$lim" | awk 'BEGIN{FS="\t"}{print $2}'
+  rm -f $T
+}
+
+if [ "$s" = list ]; then
+  text
+  if [ -n "$d" ]; then list 100000; else list 48; fi
+  exit 0
+fi
+
+# ---------- CHANGING ACTIONS: POST only ----------
+if [ -n "$arm$del$rmday" ]; then
+  text
+  if [ "$REQUEST_METHOD" != POST ]; then echo "ERR post_only"; exit 0; fi
+  if [ -n "$arm" ]; then
+    case "$arm" in 0|1) ;; *) echo "ERR invalid"; exit 0;; esac
+    echo "$arm" > "$ARMF.new" && mv -f "$ARMF.new" "$ARMF" && sync && echo "OK $arm" || echo "ERR sd_write"
+    exit 0
+  fi
+  if [ -n "$del" ]; then
+    n=0
+    if [ -n "$f" ]; then
+      day_ok "$d" && hour_ok "$h" && vid_ok "$f" || { echo "ERR invalid"; exit 0; }
+      rm -f "$BASE/$d/$h/$f" && n=$((n+1))
+    fi
+    if [ -n "$p" ]; then
+      snap_ok "$p" || { echo "ERR invalid"; exit 0; }
+      rm -f "$OUT/$p" "$OUT/${p%.jpg}.clip" && n=$((n+1))
+    fi
+    sync; echo "OK $n"; exit 0
+  fi
+  if [ -n "$rmday" ]; then
+    day_ok "$rmday" || { echo "ERR invalid"; exit 0; }
+    [ "$rmday" = "$(date +%Y-%m-%d)" ] && { echo "ERR today"; exit 0; }
+    ymd=$rmday; ymd="${ymd%%-*}${ymd#????-}"; ymd="${ymd%-*}${ymd##*-}"
+    rm -f "$BASE/$rmday"/[0-2][0-9]/*.mp4 "$OUT"/mo_${ymd}_*.jpg "$OUT"/mo_${ymd}_*.clip
+    sync; echo "OK $rmday"; exit 0
+  fi
+fi
+
+# ---------- PAGE ----------
+echo "Content-type: text/html; charset=utf-8"
+echo "Cache-Control: no-store"
+echo ""
+cat <<'EOT'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC1703L Plus · Recordings</title>
+<style>
+:root{--bg:#f3f4f6;--card:#fff;--fg:#1d2330;--muted:#667085;--line:#e2e5ea;--accent:#2563eb;--good:#15803d;--bad:#b91c1c;--shadow:rgba(0,0,0,.06)}
+@media (prefers-color-scheme:dark){:root{--bg:#101317;--card:#1a1f26;--fg:#e6e9ee;--muted:#97a1af;--line:#2b323c;--accent:#5b9cf6;--good:#4ade80;--bad:#f87171;--shadow:rgba(0,0,0,.3)}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:17px;margin:0}
+#summary{font-size:13px;color:var(--muted)}
+.right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+a{color:var(--accent)}
+main{max-width:1200px;margin:0 auto;padding:16px}
+button,.btn{font:inherit;font-size:14px;min-height:36px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+button:hover,.btn:hover{border-color:var(--accent)}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.45;cursor:default}
+.lang button{min-height:30px;padding:3px 9px;font-size:12px}
+#mail{font-size:14px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);display:flex;gap:8px;align-items:center}
+#mail b.good{color:var(--good)} #mail b.off{color:var(--muted)}
+#days{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;-webkit-overflow-scrolling:touch}
+#days button{white-space:nowrap;flex:none}
+#days small{opacity:.75;margin-left:4px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px}
+.head h2{font-size:16px;margin:0}
+h3{font-size:13px;font-weight:600;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.05em}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.event{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 2px var(--shadow)}
+.thumb{position:relative;aspect-ratio:16/9;background:#000;display:block;border:0;padding:0;width:100%;cursor:pointer;border-radius:0}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .none{color:#9aa4b2;font-size:13px;display:flex;align-items:center;justify-content:center;height:100%}
+.thumb .play{position:absolute;inset:auto auto 8px 8px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:3px 8px;border-radius:6px}
+.info{padding:8px 10px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.info b{font-variant-numeric:tabular-nums}
+.info small{color:var(--muted)}
+.acts{display:flex;gap:6px;padding:0 10px 10px;flex-wrap:wrap}
+.acts button,.acts .btn{min-height:32px;padding:4px 10px;font-size:13px}
+.empty{color:var(--muted);padding:24px 0}
+#state{font-size:13px;min-height:18px}
+#state.bad{color:var(--bad)} #state.good{color:var(--good)}
+dialog{border:0;border-radius:12px;padding:0;background:var(--card);color:var(--fg);width:min(960px,96vw);max-height:92vh}
+dialog::backdrop{background:rgba(0,0,0,.7)}
+.ptop{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.ptop b{font-size:14px}
+#parea{background:#000;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:#cbd2dc;font-size:14px;text-align:center}
+#parea video,#parea img{width:100%;height:100%;object-fit:contain;display:block}
+#pnote{font-size:12px;color:var(--muted);padding:8px 12px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1 data-i18n="title">Recordings</h1><div id="summary" data-i18n="reading">Reading…</div></div>
+  <div class="right">
+    <div id="mail"><span data-i18n="mail">Motion e-mail:</span> <b id="mailstate">…</b> <button id="mailbtn" type="button">…</button></div>
+    <a class="btn" id="panel" href="#" data-i18n="panel">Camera panel</a>
+    <div class="lang right" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button></div>
+  </div>
+</header>
+<main>
+  <div id="days" role="tablist"></div>
+  <div class="head"><h2 id="heading"></h2><div class="right"><span id="state" role="status" aria-live="polite"></span><button id="rmday" class="danger" type="button" data-i18n="rmday" hidden>Delete this day</button></div></div>
+  <div id="list"></div>
+</main>
+<dialog id="player">
+  <div class="ptop"><b id="ptitle"></b><span class="right"><a class="btn" id="pdl" href="#" data-i18n="download">Download</a><button id="pclose" type="button" data-i18n="close">Close</button></span></div>
+  <div id="parea"></div>
+  <div id="pnote"></div>
+</dialog>
+<script>
+(function(){
+'use strict';
+var L={
+en:{title:'Recordings',reading:'Reading…',mail:'Motion e-mail:',panel:'Camera panel',rmday:'Delete this day',download:'Download',close:'Close',
+ latest:'Latest events',today:'Today',on:'On',off:'Off',turn_off:'Turn off',turn_on:'Turn on',unreachable:'Camera unreachable',
+ summary:'{0} clips, {1} snapshots · SD {2} / {3} GB ({4}%)',no_rec:'No recordings.',events_h:'{0}:00 · {1} events',events_h1:'{0}:00 · 1 event',
+ no_photo:'No snapshot',play:'▶ Play',photo:'Snapshot',del:'Delete',only_photo:'snapshot only',
+ c_mail_off:'Turn off motion e-mail? Recording continues; only the e-mail stops.',mail_on:'Motion e-mail on (the mailer picks it up within a minute)',mail_off:'Motion e-mail off',mail_err:'E-mail setting unchanged: {0}',
+ c_del:'Delete the {0} event? {1} will be deleted permanently.',w_both:'The clip and the snapshot',w_clip:'The clip',w_photo:'The snapshot',deleted:'{0} event deleted',del_err:'Could not delete: {0}',
+ c_rmday:'Permanently delete {1} clips and {2} snapshots of {0}? This cannot be undone.',day_deleted:'{0} deleted',today_locked:'Recording is running today, today cannot be deleted',
+ downloading:'Downloading the clip ({0})…',preparing:'Preparing…',no_video:'the clip has no video track',convert:'could not convert',
+ cant_play:'This browser could not play the clip (HEVC/H.265). Use Safari or Download and open it in VLC.',play_err:'Could not play: {0}. Download it and open it in VLC.',
+ p_note:'{0}{1}audio not played (video only)',sec:'s',
+ ERR_post_only:'only from the buttons',ERR_invalid:'invalid request',ERR_sd_write:'cannot write to the SD card',ERR_today:'today cannot be deleted',
+ months:['January','February','March','April','May','June','July','August','September','October','November','December'],
+ wdays:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']},
+tr:{title:'Kayıtlar',reading:'Okunuyor…',mail:'Hareket maili:',panel:'Kamera paneli',rmday:'Bu günü sil',download:'İndir',close:'Kapat',
+ latest:'Son olaylar',today:'Bugün',on:'Açık',off:'Kapalı',turn_off:'Kapat',turn_on:'Aç',unreachable:'Kameraya ulaşılamıyor',
+ summary:'{0} video, {1} fotoğraf · SD {2} / {3} GB (%{4})',no_rec:'Kayıt yok.',events_h:'{0}:00 · {1} olay',events_h1:'{0}:00 · 1 olay',
+ no_photo:'Fotoğraf yok',play:'▶ Oynat',photo:'Fotoğraf',del:'Sil',only_photo:'yalnız fotoğraf',
+ c_mail_off:'Hareket maili kapatılsın mı? Kayıt devam eder, yalnız mail gitmez.',mail_on:'Hareket maili açıldı (mail betiği en geç 1 dk içinde görür)',mail_off:'Hareket maili kapatıldı',mail_err:'Mail ayarı değişmedi: {0}',
+ c_del:'{0} olayı silinsin mi? {1} kalıcı olarak silinir.',w_both:'Video ve fotoğraf',w_clip:'Video',w_photo:'Fotoğraf',deleted:'{0} olayı silindi',del_err:'Silinemedi: {0}',
+ c_rmday:'{0} günündeki {1} video ve {2} fotoğraf kalıcı olarak silinsin mi? Bu geri alınamaz.',day_deleted:'{0} silindi',today_locked:'Bugünün kaydı sürüyor, silinemez',
+ downloading:'Video indiriliyor ({0})…',preparing:'Hazırlanıyor…',no_video:'videoda görüntü izi yok',convert:'dönüştürülemedi',
+ cant_play:'Bu tarayıcı videoyu oynatamadı (HEVC/H.265). Safari kullanın ya da İndir ile VLC\'de açın.',play_err:'Oynatılamadı: {0}. İndir ile VLC\'de açabilirsiniz.',
+ p_note:'{0}{1}ses çalınmaz (yalnız görüntü)',sec:'sn',
+ ERR_post_only:'yalnız düğmelerle',ERR_invalid:'geçersiz istek',ERR_sd_write:'SD karta yazılamadı',ERR_today:'bugün silinemez',
+ months:['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'],
+ wdays:['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi']}};
+var lang='en';
+try{var q=new URLSearchParams(location.search).get('lang');if(q==='tr'||q==='en')localStorage.setItem('hc_lang',q);lang=localStorage.getItem('hc_lang')||'en'}catch(e){}
+if(!L[lang])lang='en';
+function t(k){var s=L[lang][k]!==undefined?L[lang][k]:(L.en[k]!==undefined?L.en[k]:k),a=arguments;return String(s).replace(/\{(\d)\}/g,function(_,i){return a[+i+1]})}
+function arr(k){return L[lang][k]||L.en[k]}
+var $=function(s){return document.querySelector(s)};
+var sel=new URLSearchParams(location.search).get('d')||'';
+if(!/^\d{4}-\d{2}-\d{2}$/.test(sel))sel='';
+var today='',armed=null,dayInfo={},lastData=null;
+function dec(n){return lang==='tr'?String(n).replace('.',','):String(n)}
+function dayName(g,short){var a=g.split('-'),d=new Date(+a[0],+a[1]-1,+a[2]),m=arr('months')[+a[1]-1];
+  if(short)return lang==='tr'?(+a[2])+' '+m.slice(0,3):m.slice(0,3)+' '+(+a[2]);
+  return lang==='tr'?(+a[2])+' '+m+' '+a[0]+', '+arr('wdays')[d.getDay()]:arr('wdays')[d.getDay()]+', '+m+' '+(+a[2])+', '+a[0]}
+function mb(b){return dec((b/1048576).toFixed(1))+' MB'}
+function hms(f){return f.slice(0,2)+':'+f.slice(2,4)+':'+f.slice(4,6)}
+function state(s,c){var m=$('#state');m.textContent=s;m.className=c||''}
+function errText(r){var p=r.split(/\s+/);return p[0]==='ERR'?t('ERR_'+p[1]):r}
+function post(u){return fetch(u,{method:'POST',cache:'no-store'}).then(function(r){return r.text()}).then(function(x){x=x.trim();if(x.indexOf('OK')!==0)throw new Error(errText(x));return x})}
+function applyLang(){
+  document.documentElement.lang=lang;
+  document.querySelectorAll('[data-i18n]').forEach(function(e){e.textContent=t(e.dataset.i18n)});
+  document.querySelectorAll('[data-lang]').forEach(function(b){b.classList.toggle('on',b.dataset.lang===lang)});
+  $('#panel').href='http://'+location.hostname+':8080/cgi-bin/webui?lang='+lang;
+  $('#heading').textContent=sel?dayName(sel):t('latest');
+  if(lastData)render(lastData);
+}
+document.querySelectorAll('[data-lang]').forEach(function(b){b.onclick=function(){lang=b.dataset.lang;try{localStorage.setItem('hc_lang',lang)}catch(e){}applyLang()}});
+
+function load(){
+  state(t('reading'));
+  fetch('gal?s=list'+(sel?'&d='+sel:''),{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
+    var d={days:[],events:[],total:null,sd:[0,1]};
+    x.split('\n').forEach(function(s){
+      var a=s.split('|');
+      if(a[0]==='status'){armed=a[1]==='1';d.sd=[+a[2],+a[3]];today=a[4]}
+      else if(a[0]==='total')d.total=a;
+      else if(a[0]==='day')d.days.push({g:a[1],ev:+a[2],clips:+a[3],snaps:+a[4],bytes:+a[5]});
+      else if(a[0]==='event')d.events.push({g:a[1],h:a[2],f:a[3],bytes:+a[4],p:a[5]});
+    });
+    lastData=d;render(d);state('');
+  }).catch(function(){state(t('unreachable'),'bad')});
+}
+function render(d){
+  var used=d.sd[0],all=d.sd[1]||1;
+  $('#summary').textContent=t('summary',d.total?d.total[1]:0,d.total?d.total[2]:0,dec((used/1048576).toFixed(2)),dec((all/1048576).toFixed(1)),Math.round(100*used/all));
+  showMail();drawDays(d.days);drawList(d.events);
+}
+function showMail(){
+  var b=$('#mailstate');
+  if(armed){b.textContent=t('on');b.className='good';$('#mailbtn').textContent=t('turn_off')}
+  else{b.textContent=t('off');b.className='off';$('#mailbtn').textContent=t('turn_on')}
+}
+$('#mailbtn').onclick=function(){
+  var v=armed?0:1;
+  if(!v&&!confirm(t('c_mail_off')))return;
+  post('gal?arm='+v).then(function(){armed=!!v;showMail();state(t(v?'mail_on':'mail_off'),'good')}).catch(function(e){state(t('mail_err',e.message),'bad')});
+};
+function drawDays(days){
+  var k=$('#days');k.textContent='';dayInfo={};
+  var b=document.createElement('button');b.type='button';b.textContent=t('latest');if(!sel)b.className='on';b.onclick=function(){pick('')};k.appendChild(b);
+  days.forEach(function(g){
+    dayInfo[g.g]=g;
+    var b=document.createElement('button');b.type='button';b.textContent=(g.g===today?t('today'):dayName(g.g,true));
+    var s=document.createElement('small');s.textContent=g.ev;b.appendChild(s);
+    if(g.g===sel)b.className='on';
+    b.onclick=function(){pick(g.g)};k.appendChild(b);
+  });
+  var r=$('#rmday');r.hidden=!sel;r.disabled=(sel===today);r.title=sel===today?t('today_locked'):'';
+}
+function pick(g){sel=g;try{history.replaceState(null,'',g?'?d='+g:location.pathname)}catch(e){}
+  $('#heading').textContent=g?dayName(g):t('latest');load()}
+
+function card(o,withDay){
+  var d=document.createElement('div');d.className='event';
+  var r=document.createElement('button');r.type='button';r.className='thumb';
+  if(o.p){var i=document.createElement('img');i.loading='lazy';i.alt='';i.src='/'+o.p;r.appendChild(i)}
+  else{var y=document.createElement('div');y.className='none';y.textContent=t('no_photo');r.appendChild(y)}
+  if(o.f){var e=document.createElement('span');e.className='play';e.textContent=t('play');r.appendChild(e)}
+  r.onclick=function(){o.f?play(o):photo(o)};
+  var when=o.f?hms(o.f.slice(9,15)):hms(o.p.slice(12,18));
+  var info=document.createElement('div');info.className='info';
+  var bb=document.createElement('b');bb.textContent=when;
+  var sm=document.createElement('small');sm.textContent=(withDay?(o.g===today?t('today'):dayName(o.g,true))+' · ':'')+(o.f?mb(o.bytes):t('only_photo'));
+  info.appendChild(bb);info.appendChild(sm);
+  var acts=document.createElement('div');acts.className='acts';
+  if(o.f){var a=document.createElement('a');a.className='btn';a.textContent=t('download');a.href=dlUrl(o);acts.appendChild(a)}
+  if(o.p){var pa=document.createElement('a');pa.className='btn';pa.textContent=t('photo');pa.href='/'+o.p;pa.target='_blank';pa.rel='noopener';acts.appendChild(pa)}
+  var del=document.createElement('button');del.type='button';del.className='danger';del.textContent=t('del');
+  del.onclick=function(){
+    if(!confirm(t('c_del',when,t(o.f&&o.p?'w_both':o.f?'w_clip':'w_photo'))))return;
+    var u='gal?del=1'+(o.f?'&d='+o.g+'&h='+o.h+'&f='+o.f:'')+(o.p?'&p='+o.p:'');
+    post(u).then(function(){d.remove();state(t('deleted',when),'good')}).catch(function(e){state(t('del_err',e.message),'bad')});
+  };
+  acts.appendChild(del);
+  d.appendChild(r);d.appendChild(info);d.appendChild(acts);
+  return d;
+}
+function drawList(events){
+  var l=$('#list');l.textContent='';
+  if(!events.length){var p=document.createElement('p');p.className='empty';p.textContent=t('no_rec');l.appendChild(p);return}
+  if(!sel){var g=document.createElement('div');g.className='grid';events.forEach(function(o){g.appendChild(card(o,true))});l.appendChild(g);return}
+  var cur=null,grid=null,count={};
+  events.forEach(function(o){count[o.h]=(count[o.h]||0)+1});
+  events.forEach(function(o){
+    if(o.h!==cur){cur=o.h;var h=document.createElement('h3');h.textContent=count[o.h]===1?t('events_h1',o.h):t('events_h',o.h,count[o.h]);l.appendChild(h);grid=document.createElement('div');grid.className='grid';l.appendChild(grid)}
+    grid.appendChild(card(o,false));
+  });
+}
+$('#rmday').onclick=function(){
+  var g=dayInfo[sel];if(!g)return;
+  if(!confirm(t('c_rmday',dayName(sel),g.clips,g.snaps)))return;
+  post('gal?rmday='+sel).then(function(){state(t('day_deleted',dayName(sel,true)),'good');pick('')}).catch(function(e){state(t('del_err',e.message),'bad')});
+};
+
+// Player: the camera's MP4 does not open directly in Safari; mp4box.js remuxes it to fragmented MP4 in the browser.
+function dlUrl(o){return 'gal?dl=1&d='+o.g+'&h='+o.h+'&f='+o.f}
+var dlg=$('#player'),area=$('#parea'),url=null,abort=null;
+function close(){if(abort)abort.abort();abort=null;var v=area.querySelector('video');if(v){v.pause();v.removeAttribute('src');v.load()}area.textContent='';if(url){URL.revokeObjectURL(url);url=null}if(dlg.open)dlg.close()}
+$('#pclose').onclick=close;
+dlg.addEventListener('cancel',function(e){e.preventDefault();close()});
+dlg.addEventListener('click',function(e){if(e.target===dlg)close()});
+function openDlg(title,dl){area.textContent='';$('#ptitle').textContent=title;var a=$('#pdl');a.hidden=!dl;if(dl)a.href=dl;$('#pnote').textContent='';if(!dlg.open)dlg.showModal()}
+function photo(o){openDlg(dayName(o.g,true)+' · '+hms(o.p.slice(12,18)),null);var i=document.createElement('img');i.src='/'+o.p;i.alt='';area.appendChild(i)}
+var boxLoad=null;
+function mp4box(){if(window.MP4Box)return Promise.resolve();if(boxLoad)return boxLoad;
+  boxLoad=new Promise(function(ok,fail){var s=document.createElement('script');s.src='/mp4box.js';s.onload=ok;s.onerror=function(){boxLoad=null;fail(new Error('mp4box.js'))};document.head.appendChild(s)});return boxLoad}
+function play(o){
+  close();
+  openDlg(dayName(o.g,true)+' · '+hms(o.f.slice(9,15))+' · '+mb(o.bytes),dlUrl(o));
+  area.textContent=t('downloading',mb(o.bytes));
+  var ac=new AbortController();abort=ac;
+  Promise.all([mp4box(),fetch(dlUrl(o),{signal:ac.signal}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer()})]).then(function(x){
+    if(abort!==ac)return;
+    area.textContent=t('preparing');
+    var ab=x[1],m=MP4Box.createFile(),parts=[],vid=null,info=null;
+    m.onError=function(e){throw new Error('mp4box: '+e)};
+    m.onReady=function(inf){info=inf;for(var i=0;i<inf.tracks.length;i++){var tr=inf.tracks[i];if(tr.video||tr.type==='video'){vid=tr.id;break}}
+      if(vid===null)return;m.setSegmentOptions(vid,null,{nbSamples:1000000});
+      m.initializeSegmentation().forEach(function(s){if(s.id===vid)parts.push(s.buffer)});m.start()};
+    m.onSegment=function(id,u,buf){if(id===vid)parts.push(buf)};
+    ab.fileStart=0;m.appendBuffer(ab);m.flush();
+    if(vid===null)throw new Error(t('no_video'));
+    if(parts.length<2)throw new Error(t('convert'));
+    url=URL.createObjectURL(new Blob(parts,{type:'video/mp4'}));
+    var v=document.createElement('video');v.controls=true;v.playsInline=true;v.autoplay=true;v.muted=true;v.src=url;
+    v.onerror=function(){area.textContent=t('cant_play')};
+    area.textContent='';area.appendChild(v);
+    var vt=info.tracks.filter(function(tr){return tr.id===vid})[0];
+    $('#pnote').textContent=t('p_note',(vt&&vt.video?vt.video.width+'×'+vt.video.height+' · ':''),(info.duration&&info.timescale?Math.round(info.duration/info.timescale)+' '+t('sec')+' · ':''));
+  }).catch(function(e){if(e.name==='AbortError')return;area.textContent=t('play_err',e.message)});
+}
+applyLang();load();
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&!dlg.open)load()});
+})();
+</script>
+</body>
+</html>
+EOT

@@ -1,0 +1,516 @@
+#!/bin/sh
+# HC1703L-WEBUI-SD  HC1703L Plus control panel, built on the base hack's "Augentix hacks UI". MIT License.
+# The original stays on flash: /bak/hack/www/cgi-bin/webui. This file comes from the SD card and is
+# bind-mounted over it in RAM (clean/www/kur.sh). "umount /tmp/hack/www/cgi-bin/webui" restores the original.
+#
+# Endpoints (the page is static; the browser fetches data and localises it, English or Turkish):
+#   GET  webui                      page
+#   GET  webui?s=status|snap|logs   machine-readable status | JPEG snapshot | plain-text logs
+#   POST webui?c=COMMAND            command; replies "OK [code args]" or "ERR code".
+#                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
+# Light, IR and PTZ commands are the same lines as in the original webui.
+R=/tmp/mnt/mmc01/0
+C=$R/clean
+q=$QUERY_STRING
+s=; c=
+case "$q" in
+  s=*) s=${q#s=}; s=${s%%&*} ;;
+  c=*) c=${q#c=}; c=${c%%&*} ;;
+esac
+case "$s$c" in *[!A-Za-z0-9_]*) s=; c= ;; esac
+
+text(){ echo "Content-type: text/plain; charset=utf-8"; echo "Cache-Control: no-store"; echo ""; }
+md(){ set -- $(md5sum "$1" 2>/dev/null); echo "$1"; }
+shp_read(){ awk '/^\[SHP_V2\]/{f=1;next} /^\[/{f=0} f&&/^strength *=/{gsub(/[^0-9]/,"");print;exit}' "$1" 2>/dev/null; }
+h(){ httpclt get "http://127.0.0.1:8001/$1" >/dev/null 2>&1; }
+
+find_mode(){
+  a=$(md /tmp/dip_extend.ini)
+  mode=unknown
+  [ -n "$a" ] || return
+  [ "$a" = "$(md /tmp/dip_extend_day.ini)" ] && { mode=day; return; }
+  [ "$a" = "$(md /tmp/dip_extend_night.ini)" ] && { mode=night; return; }
+  [ "$a" = "$(md /tmp/dip_extend_light.ini)" ] && mode=light
+}
+
+# Make p2pcam reload the day ISP file: night -> day -> auto.
+reload_day(){
+  dn=$(md /tmp/dip_extend_night.ini); dd=$(md /tmp/dip_extend_day.ini)
+  h 'ircut?mode=night'
+  i=0; while [ $i -lt 12 ] && [ "$(md /tmp/dip_extend.ini)" != "$dn" ]; do sleep 1; i=$((i+1)); done
+  sleep 3
+  h 'ircut?mode=day'
+  i=0; while [ $i -lt 12 ] && [ "$(md /tmp/dip_extend.ini)" != "$dd" ]; do sleep 1; i=$((i+1)); done
+  sleep 2
+  h 'ircut?mode=auto'
+}
+
+# Lock older than 90 s counts as stale (a killed request cannot release it).
+lock_take(){
+  read u _ < /proc/uptime; u=${u%%.*}
+  if ! mkdir /tmp/webui.lock 2>/dev/null; then
+    t=; read t < /tmp/webui.lock/time 2>/dev/null
+    case "$t" in ''|*[!0-9]*) t=0 ;; esac
+    [ $((u - t)) -gt 90 ] || return 1
+    rm -rf /tmp/webui.lock; mkdir /tmp/webui.lock 2>/dev/null || return 1
+  fi
+  echo $u > /tmp/webui.lock/time
+}
+lock_drop(){ rm -rf /tmp/webui.lock; }
+
+# Synchronous on purpose: busybox httpd kills background jobs of a finished CGI.
+sharpness(){
+  v=$1
+  lock_take || { echo "ERR sharp_busy"; return 1; }
+  trap 'lock_drop' TERM HUP PIPE INT
+  if [ -f $C/sensor_day.ini ]; then
+    n=$C/sensor_day.new
+    if sed "/^\[SHP_V2\]/,/^\[/ s/^strength = [0-9]*/strength = $v/" $C/sensor_day.ini > $n &&
+       grep -q '^\[AE\]' $n && grep -q '^\[TE\]' $n && [ "$(shp_read $n)" = "$v" ] &&
+       sync && mv -f $n $C/sensor_day.ini && sync; then :; else
+      rm -f $n; lock_drop; echo "ERR sd_write"; return 1
+    fi
+  fi
+  sed -i "/^\[SHP_V2\]/,/^\[/ s/^strength = [0-9]*/strength = $v/" /tmp/sensor_day.ini
+  find_mode
+  if [ "$mode" = day ]; then
+    reload_day; lock_drop; find_mode
+    echo "OK sharp_applied $v $mode"
+  else
+    lock_drop
+    echo "OK sharp_saved $v"
+  fi
+}
+
+next_stock(){
+  [ -d $C ] || { echo "ERR no_sd"; return 1; }
+  touch $C/DISABLE && rm -f $R/debug_cmd.sh && sync || { echo "ERR sd_write"; return 1; }
+  echo "OK next_stock"
+}
+
+next_patched(){
+  [ -f $C/debug_cmd.sh ] && [ -f $C/p2pcam.sqfs ] || { echo "ERR no_loader"; return 1; }
+  rm -f $C/DISABLE $C/a1 $C/a2 $C/a3
+  n=$R/debug_cmd.new
+  rm -f $n
+  if cp $C/debug_cmd.sh $n && sync && [ "$(md $C/debug_cmd.sh)" = "$(md $n)" ] && mv -f $n $R/debug_cmd.sh && sync; then
+    echo "OK next_patched"
+  else
+    rm -f $n; echo "ERR sd_write"; return 1
+  fi
+}
+
+command(){
+  case "$c" in
+    day)   h 'ircut?mode=day' ;;
+    night) h 'ircut?mode=night' ;;
+    auto)  h 'ircut?mode=auto' ;;
+    Won|wl_on)   gio -s 12 1 > /dev/null ;;
+    Woff|wl_off) gio -s 12 0 > /dev/null ;;
+    iron|ir_on)  gio -s 77 0 > /dev/null ;;
+    iroff|ir_off) gio -s 77 1 > /dev/null ;;
+    ptzl) /bin/ptz_test 1 ;;
+    ptzr) /bin/ptz_test 2 ;;
+    ptzu) /bin/ptz_test 3 ;;
+    ptzd) /bin/ptz_test 4 ;;
+    ptz0) /bin/ptz_test 0 ;;
+    ptzlu) /bin/ptz_test 1 && sleep 0.2 && /bin/ptz_test 0
+           /bin/ptz_test 3 && sleep 0.2 && /bin/ptz_test 0 ;;
+    ptzld) /bin/ptz_test 1 && sleep 0.2 && /bin/ptz_test 0
+           /bin/ptz_test 4 && sleep 0.2 && /bin/ptz_test 0 ;;
+    ptzru) /bin/ptz_test 2 && sleep 0.2 && /bin/ptz_test 0
+           /bin/ptz_test 3 && sleep 0.2 && /bin/ptz_test 0 ;;
+    ptzrd) /bin/ptz_test 2 && sleep 0.2 && /bin/ptz_test 0
+           /bin/ptz_test 4 && sleep 0.2 && /bin/ptz_test 0 ;;
+    play)         h 'playaudio?file=/tmp/VOICE/NoId.wav' ;;
+    wlon)         h 'whitelight?mode=on' ;;
+    wlof)         h 'whitelight?mode=off' ;;
+    irctrlnig)    h 'irctrl?mode=night' ;;
+    irctrlday)    h 'irctrl?mode=day' ;;
+    ircutonlyday) h 'ircut_only?mode=day' ;;
+    ircutonlynig) h 'ircut_only?mode=night' ;;
+    ircutnig)     h 'ircut?mode=night' ;;
+    ircutday)     h 'ircut?mode=day' ;;
+    redinfraon)   h 'redinfra?mode=on' ;;
+    redinfraof)   h 'redinfra?mode=off' ;;
+    sharp125|sharp140|sharp170) sharpness ${c#sharp}; return ;;
+    next_stock)   next_stock; return ;;
+    next_patched) next_patched; return ;;
+    reboot) ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
+            echo "OK rebooting"; return ;;
+    *) echo "ERR unknown"; return 1 ;;
+  esac
+  echo "OK"
+}
+
+status(){
+  echo "time=$(date '+%Y-%m-%d %H:%M:%S')"
+  read up _ < /proc/uptime; echo "uptime=${up%%.*}"
+  [ -f /tmp/p2pcam.clean.sqfs ] && echo "build=patched" || echo "build=stock"
+  if [ -f $C/DISABLE ]; then echo "next=stock_disabled"
+  elif [ -f $R/debug_cmd.sh ]; then echo "next=patched"
+  else echo "next=stock_pending"; fi
+  find_mode; echo "mode=$mode"
+  echo "sharpness=$(shp_read /tmp/sensor_day.ini)"
+  awk '/^MemAvailable/{print "mem_kb=" $2}' /proc/meminfo
+  top -b -n 1 2>/dev/null | awk '/^CPU:/{for(i=1;i<=NF;i++) if($(i+1)=="idle"){v=$i; sub(/%/,"",v); print "cpu=" 100-v; exit}}'
+  awk 'NR==3{v=$4; sub(/\.$/,"",v); print "wifi=" v}' /proc/net/wireless
+  if grep -q ' /tmp/mnt/mmc01/0 ' /proc/mounts; then
+    df -k $R | awk 'NR==2{print "sd=" $3 "|" $2}'
+    d=$(ls -1d $R/20[0-9][0-9]-* 2>/dev/null | tail -n 1)
+    hh=$(ls -1d $d/[0-2][0-9] 2>/dev/null | tail -n 1)
+    f=$(ls -1 $hh/*.mp4 2>/dev/null | tail -n 1)
+    if [ -n "$f" ]; then echo "$f" | awk -F/ '{n=$NF; print "lastmotion=" substr(n,1,4) "-" substr(n,5,2) "-" substr(n,7,2) " " substr(n,10,2) ":" substr(n,12,2) ":" substr(n,14,2)}'
+    else echo "lastmotion=none"; fi
+    echo "bootlog=$(tail -n 1 $C/boot.log 2>/dev/null)"
+  else
+    echo "sd=none"
+  fi
+  echo "cloud_routes=$(route -n 2>/dev/null | grep -c '!')"
+  echo "cloud_dns=$(awk '/^nameserver/{print $2;exit}' /etc/resolv.conf 2>/dev/null)"
+  ps | grep -q '[m]o\.sh' && echo "recorder=1" || echo "recorder=0"
+  [ -f /home/HACKP ] && echo "hack=persistent"
+}
+
+case "$s" in
+  status) text; status; exit 0 ;;
+  snap)
+    f=/tmp/wsnap.$$.jpg
+    httpclt getfile "http://127.0.0.1:8001/snapshot" $f >/dev/null 2>&1
+    if [ -s $f ]; then echo "Content-type: image/jpeg"; echo "Cache-Control: no-store"; echo ""; cat $f
+    else text; echo "no image"; fi
+    rm -f $f; exit 0 ;;
+  logs)
+    text
+    echo "== Boot log (clean/boot.log)"; tail -n 15 $C/boot.log 2>&1
+    echo; echo "== Motion service (mo.log)"; tail -n 8 $R/mo.log 2>&1
+    echo; echo "== minihack (/home/log.txt)"; tail -n 8 /home/log.txt 2>&1
+    echo; echo "== p2pcam"; md5sum /p2pcam/p2pcam 2>&1; ps | grep '[p]2pcam/p2pcam'
+    echo; echo "== Listening ports"; netstat -ltnu 2>/dev/null | grep -v '^Active'
+    echo; echo "== Routes"; route -n 2>&1
+    exit 0 ;;
+esac
+
+if [ -n "$c" ]; then
+  text
+  if [ "$REQUEST_METHOD" = POST ]; then command; else echo "ERR post_only"; fi
+  exit 0
+fi
+
+echo "Content-type: text/html; charset=utf-8"
+echo "Cache-Control: no-store"
+echo ""
+cat <<'EOT'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC1703L Plus</title>
+<style>
+:root{--bg:#f3f4f6;--card:#fff;--fg:#1d2330;--muted:#667085;--line:#e2e5ea;--accent:#2563eb;--good:#15803d;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#101317;--card:#1a1f26;--fg:#e6e9ee;--muted:#97a1af;--line:#2b323c;--accent:#5b9cf6;--good:#4ade80;--bad:#f87171}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:17px;margin:0}
+#badge{font-size:13px;color:var(--muted)}
+.right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+#msg{font-size:13px;min-height:18px;max-width:100%;overflow-wrap:anywhere}
+#msg.good{color:var(--good)} #msg.bad{color:var(--bad)}
+.lang button{min-height:30px;padding:3px 9px;font-size:12px}
+main{max-width:1120px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:780px){main{grid-template-columns:1fr;padding:12px}}
+.col{display:grid;gap:16px;min-width:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
+h3{font-size:13px;font-weight:600;margin:16px 0 8px}
+h2+h3{margin-top:0}
+#preview{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:6px;object-fit:contain}
+.under{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:var(--muted)}
+button{font:inherit;min-height:40px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:active,button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--bad)}
+button.danger:active{color:#fff;background:var(--bad);border-color:var(--bad)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.ptz-wrap{display:flex;justify-content:center;margin-top:12px}
+.ptz{display:grid;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(3,50px);gap:6px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.ptz button{padding:0;font-size:20px;touch-action:none}
+.ptz span{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
+.note{font-size:12px;color:var(--muted);margin:6px 0 0}
+dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0;font-size:14px}
+dt{color:var(--muted)}
+dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+dd.good{color:var(--good)} dd.bad{color:var(--bad)}
+input[readonly]{font:13px ui-monospace,Menlo,monospace;width:100%;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+.copy{display:flex;gap:8px;margin-top:6px}
+a{color:var(--accent)}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;max-height:360px;overflow:auto;background:var(--bg);padding:10px;border-radius:6px;margin:10px 0 0}
+details>summary{cursor:pointer;font-weight:600}
+details .row{margin-top:10px}
+details button{font:12px ui-monospace,Menlo,monospace}
+footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>HC1703L Plus</h1><div id="badge" data-i18n="reading">Reading status…</div></div>
+  <div class="right">
+    <div id="msg" role="status" aria-live="polite"></div>
+    <div class="lang row" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button></div>
+  </div>
+</header>
+<main>
+  <div class="col">
+    <section class="card">
+      <h2 data-i18n="live">Live preview</h2>
+      <img id="preview" alt="" data-i18n-alt="preview_alt">
+      <div class="under"><span id="pstate" data-i18n="connecting">Connecting…</span><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></div>
+      <p class="note" data-i18n="pv_note">About 1 frame per second, 640×360. Use the RTSP address for full quality.</p>
+      <div class="ptz-wrap">
+        <div class="ptz" data-i18n-label="ptz_label">
+          <button type="button" data-c="ptzlu" data-name="up_left" data-i18n-title="t_step">&#11017;</button>
+          <button type="button" data-hold="ptzu" data-i18n-title="t_hold">&#11014;</button>
+          <button type="button" data-c="ptzru" data-name="up_right" data-i18n-title="t_step">&#11016;</button>
+          <button type="button" data-hold="ptzl" data-i18n-title="t_hold">&#11013;</button>
+          <span>PTZ</span>
+          <button type="button" data-hold="ptzr" data-i18n-title="t_hold">&#10145;</button>
+          <button type="button" data-c="ptzld" data-name="down_left" data-i18n-title="t_step">&#11019;</button>
+          <button type="button" data-hold="ptzd" data-i18n-title="t_hold">&#11015;</button>
+          <button type="button" data-c="ptzrd" data-name="down_right" data-i18n-title="t_step">&#11018;</button>
+        </div>
+      </div>
+      <p class="note" style="text-align:center" data-i18n="ptz_note">Arrows move while held; corners take one short step.</p>
+    </section>
+    <section class="card">
+      <h2 data-i18n="controls">Controls</h2>
+      <h3 data-i18n="image_mode">Image mode</h3>
+      <div class="row">
+        <button type="button" data-c="day" data-mode="day" data-name="day" data-i18n="day">Day</button>
+        <button type="button" data-c="night" data-mode="night" data-name="night" data-i18n="night">Night</button>
+        <button type="button" data-c="auto" data-name="auto" data-i18n="auto">Auto</button>
+      </div>
+      <h3 data-i18n="lights">Lights</h3>
+      <div class="row">
+        <button type="button" data-c="wl_on" data-name="wl_on" data-i18n="wl_on">White light on</button>
+        <button type="button" data-c="wl_off" data-name="wl_off" data-i18n="wl_off">White light off</button>
+        <button type="button" data-c="ir_on" data-name="ir_on" data-i18n="ir_on">IR light on</button>
+        <button type="button" data-c="ir_off" data-name="ir_off" data-i18n="ir_off">IR light off</button>
+      </div>
+      <h3 data-i18n="sharp_title">Sharpness (day)</h3>
+      <div class="row">
+        <button type="button" data-c="sharp125" data-k="125" data-name="sharp" data-i18n="sharp125">125 · soft</button>
+        <button type="button" data-c="sharp140" data-k="140" data-name="sharp" data-i18n="sharp140">140 · default</button>
+        <button type="button" data-c="sharp170" data-k="170" data-name="sharp" data-i18n="sharp170">170 · sharp</button>
+      </div>
+      <p class="note" data-i18n="sharp_note">Saved on the SD card and kept after a reboot. Applied at once in day mode.</p>
+    </section>
+  </div>
+  <div class="col">
+    <section class="card">
+      <h2 data-i18n="status">Status</h2>
+      <dl id="status"></dl>
+    </section>
+    <section class="card">
+      <h2 data-i18n="links">Links</h2>
+      <div><a id="gallery" href="#" target="_blank" rel="noopener" data-i18n="gallery">Recordings (8090)</a></div>
+      <h3 data-i18n="rtsp_title">RTSP (VLC etc.)</h3>
+      <div class="copy"><input id="rtsp" readonly aria-label="RTSP"><button id="copy" type="button" data-i18n="copy">Copy</button></div>
+    </section>
+    <section class="card">
+      <h2 data-i18n="maint">Maintenance</h2>
+      <div class="row">
+        <button type="button" class="danger" data-c="reboot" data-name="reboot" data-confirm="c_reboot" data-i18n="reboot">Reboot</button>
+        <button type="button" id="logbtn" data-i18n="logs_show">Show logs</button>
+      </div>
+      <h3 data-i18n="next_title">On next boot</h3>
+      <div class="row">
+        <button type="button" data-c="next_patched" data-name="next_patched" data-confirm="c_patched" data-i18n="use_patched">Patched build</button>
+        <button type="button" data-c="next_stock" data-name="next_stock" data-confirm="c_stock" data-i18n="use_stock">Stock firmware</button>
+      </div>
+      <pre id="logs" hidden></pre>
+    </section>
+    <section class="card">
+      <details>
+        <summary data-i18n="advanced">Advanced: original test commands</summary>
+        <p class="note" data-i18n="adv_note">The commands of the original Augentix page, unchanged.</p>
+        <div class="row">
+          <button type="button" data-c="play">playaudio NoId.wav</button>
+          <button type="button" data-c="wlon">whitelight?mode=on</button>
+          <button type="button" data-c="wlof">whitelight?mode=off</button>
+          <button type="button" data-c="redinfraon">redinfra?mode=on</button>
+          <button type="button" data-c="redinfraof">redinfra?mode=off</button>
+          <button type="button" data-c="irctrlnig">irctrl?mode=night</button>
+          <button type="button" data-c="irctrlday">irctrl?mode=day</button>
+          <button type="button" data-c="ircutonlyday">ircut_only?mode=day</button>
+          <button type="button" data-c="ircutonlynig">ircut_only?mode=night</button>
+          <button type="button" data-c="ircutnig">ircut?mode=night</button>
+          <button type="button" data-c="ircutday">ircut?mode=day</button>
+          <button type="button" data-c="Won">GPIO 12 W LEDs On</button>
+          <button type="button" data-c="Woff">GPIO 12 W LEDs Off</button>
+          <button type="button" data-c="iron">GPIO 77 IR LEDs On</button>
+          <button type="button" data-c="iroff">GPIO 77 IR LEDs Off</button>
+        </div>
+      </details>
+    </section>
+  </div>
+</main>
+<footer><a href="https://github.com/bucagdas/hc1703l-plus" target="_blank" rel="noopener">HC1703L Plus</a></footer>
+<script>
+(function(){
+'use strict';
+var L={
+en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview',connecting:'Connecting…',pv_stop:'Stop preview',pv_start:'Start preview',
+ pv_note:'About 1 frame per second, 640×360. Use the RTSP address for full quality.',pv_live:'Live',pv_fail:'No image, retrying…',pv_stopped:'Stopped',
+ ptz_label:'Camera direction',t_step:'One short step',t_hold:'Hold to move',ptz_note:'Arrows move while held; corners take one short step.',
+ controls:'Controls',image_mode:'Image mode',day:'Day',night:'Night',auto:'Auto',lights:'Lights',wl_on:'White light on',wl_off:'White light off',ir_on:'IR light on',ir_off:'IR light off',
+ sharp_title:'Sharpness (day)',sharp125:'125 · soft',sharp140:'140 · default',sharp170:'170 · sharp',sharp:'Sharpness',sharp_note:'Saved on the SD card and kept after a reboot. Applied at once in day mode.',
+ status:'Status',links:'Links',gallery:'Recordings (8090)',rtsp_title:'RTSP (VLC etc.)',copy:'Copy',copied:'RTSP address copied',
+ maint:'Maintenance',reboot:'Reboot',logs_show:'Show logs',logs_hide:'Hide logs',loading:'Loading…',next_title:'On next boot',use_patched:'Patched build',use_stock:'Stock firmware',
+ next_patched:'Next boot: patched',next_stock:'Next boot: stock',
+ c_reboot:'Reboot the camera? No video and no recording for about a minute.',c_patched:'Use the patched build (native 720p, 25 FPS) on the next boot?',c_stock:'Use the stock firmware on the next boot? The patched build stays off until you turn it back on.',
+ advanced:'Advanced: original test commands',adv_note:'The commands of the original Augentix page, unchanged.',
+ up_left:'Up left',up_right:'Up right',down_left:'Down left',down_right:'Down right',
+ sending:'{0}: sending…',sharp_wait:'{0}: applying, about 20 s. The IR filter may click and the picture may turn black and white for a moment…',done:'{0}: done',neterr:'{0}: connection error',unreachable:'Camera unreachable',
+ OK:'done',sharp_applied:'sharpness {0} applied and saved',sharp_saved:'sharpness {0} saved, applied when day mode starts',
+ rebooting:'rebooting, the page is back in about a minute',ERR_sharp_busy:'another sharpness change is running, try again in 20 s',ERR_sd_write:'could not write to the SD card, nothing changed',
+ ERR_no_sd:'no SD card',ERR_no_loader:'loader or p2pcam.sqfs missing in clean/',ERR_unknown:'unknown command',ERR_post_only:'commands only work from the buttons',
+ k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
+ v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
+ m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
+ v_sd:'{0} used of {1} ({2}%)',v_cpu:'{0}% in use',v_persistent:'Persistent (/bak)',d:'d',h:'h',min:'min'},
+tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera önizlemesi',connecting:'Bağlanıyor…',pv_stop:'Önizlemeyi durdur',pv_start:'Önizlemeyi başlat',
+ pv_note:'Saniyede yaklaşık 1 kare, 640×360. Tam kalite için RTSP adresini kullanın.',pv_live:'Canlı',pv_fail:'Görüntü alınamadı, yeniden deneniyor…',pv_stopped:'Durduruldu',
+ ptz_label:'Kamera yönü',t_step:'Kısa bir adım',t_hold:'Basılı tutun',ptz_note:'Oklar basılı tutulduğu sürece döner; köşeler kısa bir adım atar.',
+ controls:'Kontroller',image_mode:'Görüntü modu',day:'Gündüz',night:'Gece',auto:'Otomatik',lights:'Işıklar',wl_on:'Beyaz ışık aç',wl_off:'Beyaz ışık kapat',ir_on:'IR ışık aç',ir_off:'IR ışık kapat',
+ sharp_title:'Keskinlik (gündüz)',sharp125:'125 · yumuşak',sharp140:'140 · varsayılan',sharp170:'170 · keskin',sharp:'Keskinlik',sharp_note:'SD karta kaydedilir ve yeniden başlatmada kalır. Gündüzse hemen uygulanır.',
+ status:'Durum',links:'Bağlantılar',gallery:'Kayıtlar (8090)',rtsp_title:'RTSP (VLC vb.)',copy:'Kopyala',copied:'RTSP adresi kopyalandı',
+ maint:'Bakım',reboot:'Yeniden başlat',logs_show:'Günlükleri göster',logs_hide:'Günlükleri gizle',loading:'Okunuyor…',next_title:'Sonraki açılışta',use_patched:'Yamalı sürüm',use_stock:'Stok yazılım',
+ next_patched:'Sonraki açılış: yamalı',next_stock:'Sonraki açılış: stok',
+ c_reboot:'Kamera yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',c_patched:'Sonraki açılışta yamalı sürüm (720p, 25 FPS) kullanılsın mı?',c_stock:'Sonraki açılışta stok yazılım kullanılsın mı? Yamalı sürüm, siz geri açana kadar kapalı kalır.',
+ advanced:'Gelişmiş: orijinal test komutları',adv_note:'Orijinal Augentix sayfasındaki komutlar, aynen.',
+ up_left:'Sol üst',up_right:'Sağ üst',down_left:'Sol alt',down_right:'Sağ alt',
+ sending:'{0}: gönderiliyor…',sharp_wait:'{0}: uygulanıyor, yaklaşık 20 sn. IR filtresi tıklayabilir, görüntü bir an siyah-beyaz olabilir…',done:'{0}: tamam',neterr:'{0}: bağlantı hatası',unreachable:'Kameraya ulaşılamıyor',
+ OK:'tamam',sharp_applied:'keskinlik {0} uygulandı ve kaydedildi',sharp_saved:'keskinlik {0} kaydedildi, gündüz moduna geçince uygulanır',
+ rebooting:'yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir',ERR_sharp_busy:'başka bir keskinlik işlemi sürüyor, 20 sn sonra tekrar deneyin',ERR_sd_write:'SD karta yazılamadı, hiçbir şey değişmedi',
+ ERR_no_sd:'SD kart yok',ERR_no_loader:'clean/ içinde yükleyici ya da p2pcam.sqfs yok',ERR_unknown:'bilinmeyen komut',ERR_post_only:'komutlar yalnız düğmelerle çalışır',
+ k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
+ v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
+ m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
+ v_sd:'{0} dolu / {1} (%{2})',v_cpu:'%{0} kullanımda',v_persistent:'Kalıcı (/bak)',d:'gün',h:'sa',min:'dk'}};
+var lang='en';
+try{var q=new URLSearchParams(location.search).get('lang');if(q==='tr'||q==='en'){localStorage.setItem('hc_lang',q)}lang=localStorage.getItem('hc_lang')||'en'}catch(e){}
+if(!L[lang])lang='en';
+function t(k){var s=(L[lang][k]!==undefined?L[lang][k]:(L.en[k]!==undefined?L.en[k]:k)),a=arguments;return s.replace(/\{(\d)\}/g,function(_,i){return a[+i+1]})}
+var $=function(s){return document.querySelector(s)};
+function applyLang(){
+  document.documentElement.lang=lang;
+  document.querySelectorAll('[data-i18n]').forEach(function(e){e.textContent=t(e.dataset.i18n)});
+  document.querySelectorAll('[data-i18n-title]').forEach(function(e){e.title=t(e.dataset.i18nTitle)});
+  document.querySelectorAll('[data-i18n-alt]').forEach(function(e){e.alt=t(e.dataset.i18nAlt)});
+  document.querySelectorAll('[data-i18n-label]').forEach(function(e){e.setAttribute('aria-label',t(e.dataset.i18nLabel))});
+  document.querySelectorAll('[data-lang]').forEach(function(b){b.classList.toggle('on',b.dataset.lang===lang)});
+  $('#ptoggle').textContent=t(open?'pv_stop':'pv_start');
+  $('#logbtn').textContent=t($('#logs').hidden?'logs_show':'logs_hide');
+  $('#gallery').href='http://'+host+':8090/cgi-bin/gal?lang='+lang;
+  if(last)render(last);
+}
+document.querySelectorAll('[data-lang]').forEach(function(b){b.onclick=function(){lang=b.dataset.lang;try{localStorage.setItem('hc_lang',lang)}catch(e){}applyLang()}});
+
+var host=location.hostname;
+$('#rtsp').value='rtsp://'+host+':554/0/av0';
+$('#copy').onclick=function(){var i=$('#rtsp');i.focus();i.select();try{document.execCommand('copy');msg(t('copied'),'good')}catch(e){}};
+
+function msg(s,c){var m=$('#msg');m.textContent=s;m.className=c||''}
+function send(c){return fetch('webui?c='+c,{method:'POST',cache:'no-store'}).then(function(r){return r.text().then(function(x){return x.trim()})})}
+function reply(r){
+  var p=r.split(/\s+/);
+  if(p[0]==='OK'){if(!p[1])return [t('OK'),'good'];return [t(p[1],p[2],p[3]),'good']}
+  if(p[0]==='ERR')return [t('ERR_'+(p[1]||'unknown')),'bad'];
+  return [r,'bad'];
+}
+function label(b){var n=b.dataset.name;if(n==='sharp')return t('sharp')+' '+b.dataset.k;return n?t(n):b.textContent.trim()}
+function command(b){
+  var c=b.dataset.c,name=label(b);
+  if(b.dataset.confirm&&!confirm(t(b.dataset.confirm)))return;
+  msg(t(/^sharp/.test(c)?'sharp_wait':'sending',name));
+  send(c).then(function(r){var x=reply(r);msg(name+': '+x[0],x[1])},function(){msg(t('neterr',name),'bad')});
+  setTimeout(status,1500);
+}
+document.addEventListener('click',function(e){var b=e.target.closest('button[data-c]');if(b)command(b)});
+
+// PTZ hold: commands are chained so "stop" can never overtake "move".
+var chain=Promise.resolve(),held=null;
+function ptz(c){chain=chain.then(function(){return send(c)}).catch(function(){})}
+function release(){if(!held)return;held.classList.remove('on');held=null;ptz('ptz0')}
+document.querySelectorAll('button[data-hold]').forEach(function(b){
+  b.addEventListener('pointerdown',function(e){
+    e.preventDefault();if(held)return;held=b;b.classList.add('on');
+    try{b.setPointerCapture(e.pointerId)}catch(_){}
+    ptz(b.dataset.hold);
+  });
+  ['pointerup','pointercancel','lostpointercapture'].forEach(function(ev){b.addEventListener(ev,release)});
+  b.addEventListener('contextmenu',function(e){e.preventDefault()});
+});
+window.addEventListener('blur',release);
+document.addEventListener('visibilitychange',function(){if(document.hidden)release()});
+
+// Preview: next frame 1 s after the previous one loaded; paused while the tab is hidden.
+var img=$('#preview'),open=true,waiting=false,timer=null;
+function next(){clearTimeout(timer);if(!open||document.hidden||waiting)return;waiting=true;img.src='webui?s=snap&t='+Date.now()}
+img.onload=function(){waiting=false;$('#pstate').textContent=t('pv_live')+' · '+new Date().toLocaleTimeString(lang==='tr'?'tr-TR':'en-GB');timer=setTimeout(next,1000)};
+img.onerror=function(){waiting=false;$('#pstate').textContent=t('pv_fail');timer=setTimeout(next,3000)};
+$('#ptoggle').onclick=function(){open=!open;this.textContent=t(open?'pv_stop':'pv_start');if(open)next();else{clearTimeout(timer);$('#pstate').textContent=t('pv_stopped')}};
+
+// Status
+var last=null;
+var ORDER=['build','next','mode','sharpness','cloud','recorder','lastmotion','sd','wifi','mem','cpu','uptime','time','hack','bootlog'];
+function gb(kb){return (kb/1048576).toFixed(2).replace('.',lang==='tr'?',':'.')+' GB'}
+function render(v){
+  var dl=$('#status');dl.textContent='';
+  function add(k,val,cls){var dt=document.createElement('dt');dt.textContent=t('k_'+k);var dd=document.createElement('dd');dd.textContent=val;if(cls)dd.className=cls;dl.appendChild(dt);dl.appendChild(dd)}
+  ORDER.forEach(function(k){
+    switch(k){
+    case 'build':if(v.build)add(k,t(v.build==='patched'?'v_patched':'v_stock'),v.build==='patched'?'good':'bad');break;
+    case 'next':if(v.next)add(k,t({patched:'v_next_patched',stock_disabled:'v_next_disabled',stock_pending:'v_next_pending'}[v.next]||v.next));break;
+    case 'mode':if(v.mode)add(k,t('m_'+v.mode));break;
+    case 'sharpness':if(v.sharpness)add(k,v.sharpness);break;
+    case 'cloud':if('cloud_routes' in v){var ok=+v.cloud_routes>=2&&v.cloud_dns==='127.0.0.1';add(k,ok?t('v_blocked',v.cloud_routes):t('v_open',v.cloud_routes,v.cloud_dns||'?'),ok?'good':'bad')}break;
+    case 'recorder':if('recorder' in v)add(k,t(v.recorder==='1'?'v_running':'v_stopped'),v.recorder==='1'?'good':'bad');break;
+    case 'lastmotion':if(v.lastmotion)add(k,v.lastmotion==='none'?t('v_none'):v.lastmotion);break;
+    case 'sd':if(v.sd){if(v.sd==='none')add(k,t('v_nosd'),'bad');else{var s=v.sd.split('|');add(k,t('v_sd',gb(+s[0]),gb(+s[1]),Math.round(100*s[0]/s[1])))}}break;
+    case 'wifi':if(v.wifi)add(k,v.wifi+' dBm');break;
+    case 'mem':if(v.mem_kb)add(k,(v.mem_kb/1024).toFixed(1).replace('.',lang==='tr'?',':'.')+' MB');break;
+    case 'cpu':if(v.cpu)add(k,t('v_cpu',v.cpu));break;
+    case 'uptime':if(v.uptime){var u=+v.uptime,dd=Math.floor(u/86400),hh=Math.floor(u%86400/3600),mm=Math.floor(u%3600/60);add(k,(dd?dd+' '+t('d')+' ':'')+hh+' '+t('h')+' '+mm+' '+t('min'))}break;
+    case 'time':if(v.time)add(k,v.time);break;
+    case 'hack':if(v.hack)add(k,t('v_persistent'));break;
+    case 'bootlog':if(v.bootlog)add(k,v.bootlog);break;
+    }
+  });
+  document.querySelectorAll('button[data-k]').forEach(function(b){b.classList.toggle('on',b.dataset.k===v.sharpness)});
+  document.querySelectorAll('button[data-mode]').forEach(function(b){b.classList.toggle('on',b.dataset.mode===v.mode)});
+  $('#badge').textContent=(v.build==='patched'?t('v_next_patched'):(lang==='tr'?'Stok':'Stock'))+' · '+t('m_'+(v.mode||'unknown'))+' · '+(v.time||'');
+}
+function status(){
+  if(document.hidden)return;
+  fetch('webui?s=status',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
+    var v={};x.split('\n').forEach(function(s){var i=s.indexOf('=');if(i>0)v[s.slice(0,i)]=s.slice(i+1)});
+    last=v;render(v);
+  }).catch(function(){$('#badge').textContent=t('unreachable')});
+}
+$('#logbtn').onclick=function(){
+  var p=$('#logs');
+  if(!p.hidden){p.hidden=true;this.textContent=t('logs_show');return}
+  p.hidden=false;p.textContent=t('loading');this.textContent=t('logs_hide');
+  fetch('webui?s=logs',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){p.textContent=x});
+};
+document.addEventListener('visibilitychange',function(){if(!document.hidden){status();next()}});
+applyLang();status();setInterval(status,5000);next();
+})();
+</script>
+</body>
+</html>
+EOT
