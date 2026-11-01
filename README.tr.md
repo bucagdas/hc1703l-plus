@@ -55,7 +55,8 @@ health.sh  T+0 plus.sh (panel, galeri, hareket servisi)
 ```
 
 Plus flash'a hiç yazmaz. SD kartı çıkarmak ya da içinden `debug_cmd.sh`'yi silmek, bir sonraki açılışta
-sizi düz temel hack'e döndürür.
+sizi düz temel hack'e döndürür. Panelden yapılan yeniden başlatma başarısız açılış sayılmaz; art arda ayar
+değiştirmek kamerayı stoğa düşürmez.
 
 ## Uyumluluk
 

@@ -54,7 +54,8 @@ health.sh  T+0 plus.sh (panel, gallery, motion service)
 ```
 
 Plus never writes to flash. Removing the SD card, or deleting `debug_cmd.sh` from it, gives you the plain
-base hack on the next boot.
+base hack on the next boot. A reboot from the panel does not count as a failed boot, so several setting changes
+in a row do not drop the camera to stock.
 
 ## Compatibility
 

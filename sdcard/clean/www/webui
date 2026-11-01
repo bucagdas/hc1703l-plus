@@ -104,6 +104,18 @@ next_patched(){
   fi
 }
 
+# A reboot asked for from this page is not a failed boot: the patched build is clearly up, since it served the
+# request. Clear the failure counters and make sure the loader is in place, otherwise a few setting changes in a
+# row would look like a crash loop and drop the camera to stock. A stock boot is left alone: health.sh decides.
+ready_for_reboot(){
+  [ -f /tmp/p2pcam.clean.sqfs ] && [ ! -f $C/DISABLE ] || return 0
+  rm -f $C/a1 $C/a2 $C/a3
+  [ -f $R/debug_cmd.sh ] && return 0
+  l=$R/debug_cmd.new
+  if cp $C/debug_cmd.sh $l && sync && [ "$(md $C/debug_cmd.sh)" = "$(md $l)" ]; then mv -f $l $R/debug_cmd.sh; else rm -f $l; fi
+  sync
+}
+
 # Motion settings live in clean/md.conf on the SD card. debug_cmd.sh applies them to RAM copies at boot,
 # so nothing is written to flash. mdcfg validates the zones before the file is replaced.
 tool(){ [ -x /tmp/mdcfg ] || { cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg; }; [ -x /tmp/mdcfg ]; }
@@ -129,11 +141,7 @@ md_save(){
   if ! /tmp/mdcfg apply /home/devParam.dat $n.out $n; then rm -f $n $n.out; echo "ERR invalid"; return 1; fi
   rm -f $n.out
   if cp $n $C/md.new && sync && mv -f $C/md.new $C/md.conf && sync; then rm -f $n; else rm -f $n $C/md.new; echo "ERR sd_write"; return 1; fi
-  # the loader is only back 5 minutes after a boot; the settings need it on the next boot
-  if [ ! -f $R/debug_cmd.sh ] && [ ! -f $C/DISABLE ]; then
-    l=$R/debug_cmd.new
-    if cp $C/debug_cmd.sh $l && sync && [ "$(md $C/debug_cmd.sh)" = "$(md $l)" ]; then mv -f $l $R/debug_cmd.sh; sync; else rm -f $l; fi
-  fi
+  ready_for_reboot
   echo "OK md_saved"
 }
 
@@ -174,7 +182,8 @@ command(){
     next_stock)   next_stock; return ;;
     next_patched) next_patched; return ;;
     md_save)      md_save; return ;;
-    reboot) ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
+    reboot) ready_for_reboot
+            ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
             echo "OK rebooting"; return ;;
     *) echo "ERR unknown"; return 1 ;;
   esac
@@ -259,8 +268,11 @@ h1{font-size:17px;margin:0}
 #msg{font-size:13px;min-height:18px;max-width:100%;overflow-wrap:anywhere}
 #msg.good{color:var(--good)} #msg.bad{color:var(--bad)}
 .lang button{min-height:30px;padding:3px 9px;font-size:12px}
-main{max-width:1120px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px;align-items:start}
-@media (max-width:780px){main{grid-template-columns:1fr;padding:12px}}
+main{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:start}
+.bottom{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;min-width:0}
+.bottom .wide{grid-column:1/-1}
+@media (max-width:1040px){.bottom{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:780px){main{grid-template-columns:1fr;padding:12px}.bottom{grid-template-columns:minmax(0,1fr)}}
 .col{display:grid;gap:16px;min-width:0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
@@ -269,6 +281,7 @@ h2+h3{margin-top:0}
 #preview{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:6px;object-fit:contain}
 #pvwrap{position:relative}
 #zonebox{position:absolute;inset:0;border-radius:6px;overflow:hidden;touch-action:none;cursor:crosshair;user-select:none;-webkit-user-select:none;background-image:linear-gradient(rgba(255,255,255,.28) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.28) 1px,transparent 1px);background-size:10% 10%}
+#zonebox.view{pointer-events:none}
 .zone{position:absolute;background:rgba(37,99,235,.38);border:2px solid #93c5fd;box-sizing:border-box;cursor:pointer}
 .zone.draft{background:rgba(250,204,21,.35);border-color:#fde047;pointer-events:none}
 .under{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:var(--muted)}
@@ -294,7 +307,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo
 details>summary{cursor:pointer;font-weight:600}
 details .row{margin-top:10px}
 details button{font:12px ui-monospace,Menlo,monospace}
-footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:var(--muted)}
+footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -310,7 +323,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
     <section class="card">
       <h2 data-i18n="live">Live preview</h2>
       <div id="pvwrap"><img id="preview" alt="" data-i18n-alt="preview_alt"><div id="zonebox" hidden></div></div>
-      <div class="under"><span id="pstate" data-i18n="connecting">Connecting…</span><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></div>
+      <div class="under"><span id="pstate" data-i18n="connecting">Connecting…</span><span class="row"><button id="zgrid" type="button" hidden></button><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></span></div>
       <p class="note" data-i18n="pv_note">About 1 frame per second, 640×360. Use the RTSP address for full quality.</p>
       <div class="ptz-wrap">
         <div class="ptz" data-i18n-label="ptz_label">
@@ -327,6 +340,8 @@ footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
       </div>
       <p class="note" style="text-align:center" data-i18n="ptz_note">Arrows move while held; corners take one short step.</p>
     </section>
+  </div>
+  <div class="col">
     <section class="card">
       <h2 data-i18n="controls">Controls</h2>
       <h3 data-i18n="image_mode">Image mode</h3>
@@ -375,7 +390,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
       <p class="note" data-i18n="md_note">Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. While tracking is on, zones are ignored.</p>
     </section>
   </div>
-  <div class="col">
+  <div class="bottom">
     <section class="card">
       <h2 data-i18n="status">Status</h2>
       <dl id="status"></dl>
@@ -399,7 +414,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
       </div>
       <pre id="logs" hidden></pre>
     </section>
-    <section class="card">
+    <section class="card wide">
       <details>
         <summary data-i18n="advanced">Advanced: original test commands</summary>
         <p class="note" data-i18n="adv_note">The commands of the original Augentix page, unchanged.</p>
@@ -444,7 +459,7 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  OK:'done',sharp_applied:'sharpness {0} applied and saved',sharp_saved:'sharpness {0} saved, applied when day mode starts',
  rebooting:'rebooting, the page is back in about a minute',ERR_sharp_busy:'another sharpness change is running, try again in 20 s',ERR_sd_write:'could not write to the SD card, nothing changed',
  ERR_no_sd:'no SD card',ERR_no_loader:'loader or p2pcam.sqfs missing in clean/',ERR_unknown:'unknown command',ERR_post_only:'commands only work from the buttons',
- md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save and reboot',md_note:'Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. While tracking is on, zones are ignored.',c_md:'Save the motion settings and reboot the camera? No video and no recording for about a minute.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
+ md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',g_hide:'Hide grid',g_show:'Show grid',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save and reboot',md_note:'Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. While tracking is on, zones are ignored.',c_md:'Save the motion settings and reboot the camera? No video and no recording for about a minute.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
  k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
  v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
  m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
@@ -464,7 +479,7 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  OK:'tamam',sharp_applied:'keskinlik {0} uygulandı ve kaydedildi',sharp_saved:'keskinlik {0} kaydedildi, gündüz moduna geçince uygulanır',
  rebooting:'yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir',ERR_sharp_busy:'başka bir keskinlik işlemi sürüyor, 20 sn sonra tekrar deneyin',ERR_sd_write:'SD karta yazılamadı, hiçbir şey değişmedi',
  ERR_no_sd:'SD kart yok',ERR_no_loader:'clean/ içinde yükleyici ya da p2pcam.sqfs yok',ERR_unknown:'bilinmeyen komut',ERR_post_only:'komutlar yalnız düğmelerle çalışır',
- md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet ve yeniden başlat',md_note:'Yeniden başlatınca uygulanır (yaklaşık 1 dakika). Bölge dışındaki hareket kaydedilmez. Takip açıkken bölgeler yok sayılır.',c_md:'Hareket ayarları kaydedilip kamera yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
+ md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',g_hide:'Izgarayı gizle',g_show:'Izgarayı göster',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet ve yeniden başlat',md_note:'Yeniden başlatınca uygulanır (yaklaşık 1 dakika). Bölge dışındaki hareket kaydedilmez. Takip açıkken bölgeler yok sayılır.',c_md:'Hareket ayarları kaydedilip kamera yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
  k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
  v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
  m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
@@ -572,7 +587,8 @@ function status(){
   }).catch(function(){$('#badge').textContent=t('unreachable')});
 }
 // Motion settings. Zones are x,y,w,h on a 10x10 grid over the preview.
-var md={s:1,t:0,z:[]},editing=false,zb=$('#zonebox'),draft=null,start=null;
+var md={s:1,t:0,z:[]},editing=false,zb=$('#zonebox'),draft=null,start=null,gridOn=true;
+try{gridOn=localStorage.getItem('hc_grid')!=='0'}catch(e){}
 function drawMd(){
   document.querySelectorAll('[data-sens]').forEach(function(b){b.classList.toggle('on',+b.dataset.sens===md.s)});
   document.querySelectorAll('[data-track]').forEach(function(b){b.classList.toggle('on',+b.dataset.track===md.t)});
@@ -580,6 +596,10 @@ function drawMd(){
   $('#zedit').textContent=t(editing?'z_done':'z_edit');
   zb.textContent='';
   md.z.forEach(function(r,i){zb.appendChild(box(r,'zone',i))});
+  // Outside edit mode the overlay is display only: it follows the zones and the user's show/hide choice.
+  zb.hidden=!(editing||(gridOn&&md.z.length));
+  zb.classList.toggle('view',!editing);
+  var g=$('#zgrid');g.hidden=editing||!md.z.length;g.textContent=t(gridOn?'g_hide':'g_show');
 }
 function box(r,cls,i){var d=document.createElement('div');d.className=cls;if(i!==undefined)d.dataset.i=i;
   d.style.left=r[0]*10+'%';d.style.top=r[1]*10+'%';d.style.width=r[2]*10+'%';d.style.height=r[3]*10+'%';return d}
@@ -600,7 +620,8 @@ zb.addEventListener('pointermove',function(e){
 function endDraw(e){if(!start)return;var r=rect(start,cell(e));start=null;draft=null;md.z.push(r);drawMd()}
 zb.addEventListener('pointerup',endDraw);
 zb.addEventListener('pointercancel',function(){start=null;draft=null;drawMd()});
-$('#zedit').onclick=function(){editing=!editing;zb.hidden=!editing;$('#zhelp').hidden=!editing;drawMd();if(editing)$('#pvwrap').scrollIntoView({behavior:'smooth',block:'center'})};
+$('#zgrid').onclick=function(){gridOn=!gridOn;try{localStorage.setItem('hc_grid',gridOn?'1':'0')}catch(e){}drawMd()};
+$('#zedit').onclick=function(){editing=!editing;$('#zhelp').hidden=!editing;drawMd();if(editing)$('#pvwrap').scrollIntoView({behavior:'smooth',block:'center'})};
 $('#zclear').onclick=function(){md.z=[];drawMd()};
 document.querySelectorAll('[data-sens]').forEach(function(b){b.onclick=function(){md.s=+b.dataset.sens;drawMd()}});
 document.querySelectorAll('[data-track]').forEach(function(b){b.onclick=function(){md.t=+b.dataset.track;drawMd()}});
