@@ -14,14 +14,11 @@ Motion fields found by reverse engineering (see ../docs/INTERNALS.md):
     0x3d4 u8   defence (armed)
     0x3d5 u8   alarm-zone state
 
-Zones are only used when hwcfg.ini has support_mdzone=1 (missing = 0). The real detection threshold comes
-from hwcfg.ini motion_level at boot, not from 0xe8. p2pcam keeps a RAM copy and rewrites the file whenever a
-setting changes, so an edited file must be installed and followed by an immediate reboot.
+The real detection threshold comes from hwcfg.ini motion_level at boot, not from 0xe8.
+
+This is an offline inspection tool. On the camera, settings are applied at boot by tools/mdcfg.c.
 
 This tool never prints the WiFi credentials stored in the same file.
-
-EXPERIMENTAL: writing an edited devParam.dat to the camera has not been tested yet. If the checksum is
-wrong, p2pcam deletes the file and restores /home/devParam.dat_bak.
 
 Usage:
     devparam.py show devParam.dat
@@ -113,7 +110,7 @@ def cmd_zones(a):
     for i, z in enumerate(zs):
         b[ZONE_OFF + 4 + 4 * i: ZONE_OFF + 8 + 4 * i] = bytes(z)
     save(b, a.out)
-    print(f'wrote {a.out} with {len(zs)} zone(s); install it, then reboot the camera immediately')
+    print(f'wrote {a.out} with {len(zs)} zone(s)')
 
 
 def main():

@@ -28,10 +28,12 @@ Plus also adds:
   Turkish (EN/TR switch in the header; the gallery follows the panel's choice).
 - **Recordings gallery** on `:8090`: motion events as cards (snapshot + clip), per-day view, in-browser
   playback, download, delete, delete a whole day, a motion e-mail switch for an external mailer.
+- **Motion settings** in the panel: sensitivity, tracking and up to 25 alarm zones drawn on the live
+  preview. Applied from RAM at boot, so they do not touch flash either.
 - **Motion snapshots** (`mo.sh`): one snapshot per motion clip, linked to it.
 - **Fixes:** RTSP socket buffer on the wrong socket, recordings skipping seconds in dim light, vendor
   port 554 accepting non-RTSP commands from the LAN.
-- **Research:** where motion detection and alarm zones are stored, plus a tool to edit them
+- **Research:** how motion detection, zones and recording work inside `p2pcam`
   ([INTERNALS](docs/INTERNALS.md)).
 
 ## How it works
@@ -42,7 +44,8 @@ power on
      ├─ <SD>/debug_cmd.sh   (Plus loader, deletes itself = one-shot)
      │    ├─ netguard.sh    cloud block (RAM copy)
      │    ├─ boot.sh        waits for the SD card, then runs health.sh
-     │    └─ binds RAM copies of clean/p2pcam.sqfs and clean/sensor.sh over /bak   (flash untouched)
+     │    ├─ binds RAM copies of clean/p2pcam.sqfs and clean/sensor.sh over /bak   (flash untouched)
+     │    └─ applies clean/md.conf to RAM copies of devParam.dat and hwcfg.ini     (flash untouched)
      ├─ sensor.sh → minihack.sh (base hack: Wi-Fi, telnet, FTP, httpd)
      └─ p2pcam (patched)
 health.sh  T+0 plus.sh (panel, gallery, motion service)
@@ -102,8 +105,8 @@ base hack on the next boot.
 
 - One firmware build only. Other builds need new offsets.
 - Tested on one camera.
-- Motion zones: offline tool only, not in the panel yet. Zones are ignored unless `hwcfg.ini` has
-  `support_mdzone=1` (see [INTERNALS](docs/INTERNALS.md)).
+- Motion settings need a reboot to take effect: the only runtime path is the disabled cloud handler.
+- While tracking is on, the camera ignores alarm zones.
 - No HTTPS (BusyBox httpd), so the panel cannot use the browser microphone for two-way audio.
 
 ## Credits and license
@@ -111,6 +114,7 @@ base hack on the next boot.
 - [@Jalecom](https://github.com/Jalecom) for the [base hack and teardown](https://github.com/Jalecom/AJ_HC1703L_Teardown), which this project
   builds on and requires, and the contributors listed there.
 - mp4box.js 0.5.2 by GPAC (BSD 3-Clause) is included for in-browser playback.
+- `sdcard/clean/bin/mdcfg` is a static ARM build of `tools/mdcfg.c` (build command in the source).
 - This repository contains only HC1703L Plus code, MIT licensed ([LICENSE](LICENSE)). The base hack is
   not included; get it from its own repository.
 - Not affiliated with Augentix or Tange. No vendor binaries are distributed. Use at your own risk.

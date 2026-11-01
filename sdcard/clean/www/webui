@@ -6,7 +6,9 @@
 # Endpoints (the page is static; the browser fetches data and localises it, English or Turkish):
 #   GET  webui                      page
 #   GET  webui?s=status|snap|logs   machine-readable status | JPEG snapshot | plain-text logs
+#   GET  webui?s=md                 motion settings (sensitivity, tracking, zones)
 #   POST webui?c=COMMAND            command; replies "OK [code args]" or "ERR code".
+#   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; the loader applies it on the next boot
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
 R=/tmp/mnt/mmc01/0
@@ -18,6 +20,8 @@ case "$q" in
   c=*) c=${q#c=}; c=${c%%&*} ;;
 esac
 case "$s$c" in *[!A-Za-z0-9_]*) s=; c= ;; esac
+v=
+case "$q" in *"&v="*) v=${q#*&v=}; v=${v%%&*} ;; esac
 
 text(){ echo "Content-type: text/plain; charset=utf-8"; echo "Cache-Control: no-store"; echo ""; }
 md(){ set -- $(md5sum "$1" 2>/dev/null); echo "$1"; }
@@ -100,6 +104,39 @@ next_patched(){
   fi
 }
 
+# Motion settings live in clean/md.conf on the SD card. debug_cmd.sh applies them to RAM copies at boot,
+# so nothing is written to flash. mdcfg validates the zones before the file is replaced.
+tool(){ [ -x /tmp/mdcfg ] || { cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg; }; [ -x /tmp/mdcfg ]; }
+md_read(){
+  sens=1; if [ -f $C/md.conf ]; then cat $C/md.conf; else tool && /tmp/mdcfg show /home/devParam.dat; echo "sensitivity=1"; fi
+}
+md_save(){
+  case "$v" in ''|*[!a-z0-9._-]*) echo "ERR invalid"; return 1 ;; esac
+  S=; T=; Z=
+  for p in $(echo "$v" | tr . ' '); do
+    case "$p" in
+      s[012]) S=${p#s} ;;
+      t[01])  T=${p#t} ;;
+      z*)     Z=${p#z} ;;
+      *) echo "ERR invalid"; return 1 ;;
+    esac
+  done
+  [ -n "$S" ] && [ -n "$T" ] || { echo "ERR invalid"; return 1; }
+  [ -d $C ] && tool || { echo "ERR no_sd"; return 1; }
+  n=/tmp/md.conf.$$
+  { echo "sensitivity=$S"; echo "tracking=$T"; echo "zones=$(echo "$Z" | tr '_-' ';,')"
+    [ -f $C/md.conf ] && grep -E '^(motion|human)=' $C/md.conf; } > $n
+  if ! /tmp/mdcfg apply /home/devParam.dat $n.out $n; then rm -f $n $n.out; echo "ERR invalid"; return 1; fi
+  rm -f $n.out
+  if cp $n $C/md.new && sync && mv -f $C/md.new $C/md.conf && sync; then rm -f $n; else rm -f $n $C/md.new; echo "ERR sd_write"; return 1; fi
+  # the loader is only back 5 minutes after a boot; the settings need it on the next boot
+  if [ ! -f $R/debug_cmd.sh ] && [ ! -f $C/DISABLE ]; then
+    l=$R/debug_cmd.new
+    if cp $C/debug_cmd.sh $l && sync && [ "$(md $C/debug_cmd.sh)" = "$(md $l)" ]; then mv -f $l $R/debug_cmd.sh; sync; else rm -f $l; fi
+  fi
+  echo "OK md_saved"
+}
+
 command(){
   case "$c" in
     day)   h 'ircut?mode=day' ;;
@@ -136,6 +173,7 @@ command(){
     sharp125|sharp140|sharp170) sharpness ${c#sharp}; return ;;
     next_stock)   next_stock; return ;;
     next_patched) next_patched; return ;;
+    md_save)      md_save; return ;;
     reboot) ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
             echo "OK rebooting"; return ;;
     *) echo "ERR unknown"; return 1 ;;
@@ -174,6 +212,7 @@ status(){
 
 case "$s" in
   status) text; status; exit 0 ;;
+  md) text; md_read; exit 0 ;;
   snap)
     f=/tmp/wsnap.$$.jpg
     httpclt getfile "http://127.0.0.1:8001/snapshot" $f >/dev/null 2>&1
@@ -228,6 +267,10 @@ h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
 h3{font-size:13px;font-weight:600;margin:16px 0 8px}
 h2+h3{margin-top:0}
 #preview{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:6px;object-fit:contain}
+#pvwrap{position:relative}
+#zonebox{position:absolute;inset:0;border-radius:6px;overflow:hidden;touch-action:none;cursor:crosshair;user-select:none;-webkit-user-select:none;background-image:linear-gradient(rgba(255,255,255,.28) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.28) 1px,transparent 1px);background-size:10% 10%}
+.zone{position:absolute;background:rgba(37,99,235,.38);border:2px solid #93c5fd;box-sizing:border-box;cursor:pointer}
+.zone.draft{background:rgba(250,204,21,.35);border-color:#fde047;pointer-events:none}
 .under{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:var(--muted)}
 button{font:inherit;min-height:40px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
 button:hover{border-color:var(--accent)}
@@ -266,7 +309,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
   <div class="col">
     <section class="card">
       <h2 data-i18n="live">Live preview</h2>
-      <img id="preview" alt="" data-i18n-alt="preview_alt">
+      <div id="pvwrap"><img id="preview" alt="" data-i18n-alt="preview_alt"><div id="zonebox" hidden></div></div>
       <div class="under"><span id="pstate" data-i18n="connecting">Connecting…</span><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></div>
       <p class="note" data-i18n="pv_note">About 1 frame per second, 640×360. Use the RTSP address for full quality.</p>
       <div class="ptz-wrap">
@@ -306,6 +349,30 @@ footer{max-width:1120px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
         <button type="button" data-c="sharp170" data-k="170" data-name="sharp" data-i18n="sharp170">170 · sharp</button>
       </div>
       <p class="note" data-i18n="sharp_note">Saved on the SD card and kept after a reboot. Applied at once in day mode.</p>
+    </section>
+    <section class="card">
+      <h2 data-i18n="md_title">Motion detection</h2>
+      <h3 data-i18n="md_sens">Sensitivity</h3>
+      <div class="row">
+        <button type="button" data-sens="0" data-i18n="s_low">Low</button>
+        <button type="button" data-sens="1" data-i18n="s_mid">Medium</button>
+        <button type="button" data-sens="2" data-i18n="s_high">High</button>
+      </div>
+      <h3 data-i18n="md_track">Tracking (camera follows motion)</h3>
+      <div class="row">
+        <button type="button" data-track="1" data-i18n="on">On</button>
+        <button type="button" data-track="0" data-i18n="off">Off</button>
+      </div>
+      <h3 data-i18n="md_zones">Alarm zones</h3>
+      <div class="row">
+        <button type="button" id="zedit" data-i18n="z_edit">Edit on preview</button>
+        <button type="button" id="zclear" data-i18n="z_clear">Clear</button>
+        <span class="note" id="zinfo" style="align-self:center;margin:0"></span>
+      </div>
+      <p class="note" id="zhelp" data-i18n="z_help" hidden>Drag on the preview to draw a zone. Tap a zone to remove it.</p>
+      <h3 data-i18n="md_apply">Apply</h3>
+      <div class="row"><button type="button" id="mdsave" data-i18n="md_save">Save and reboot</button></div>
+      <p class="note" data-i18n="md_note">Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. While tracking is on, zones are ignored.</p>
     </section>
   </div>
   <div class="col">
@@ -377,6 +444,7 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  OK:'done',sharp_applied:'sharpness {0} applied and saved',sharp_saved:'sharpness {0} saved, applied when day mode starts',
  rebooting:'rebooting, the page is back in about a minute',ERR_sharp_busy:'another sharpness change is running, try again in 20 s',ERR_sd_write:'could not write to the SD card, nothing changed',
  ERR_no_sd:'no SD card',ERR_no_loader:'loader or p2pcam.sqfs missing in clean/',ERR_unknown:'unknown command',ERR_post_only:'commands only work from the buttons',
+ md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save and reboot',md_note:'Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. While tracking is on, zones are ignored.',c_md:'Save the motion settings and reboot the camera? No video and no recording for about a minute.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
  k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
  v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
  m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
@@ -396,6 +464,7 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  OK:'tamam',sharp_applied:'keskinlik {0} uygulandı ve kaydedildi',sharp_saved:'keskinlik {0} kaydedildi, gündüz moduna geçince uygulanır',
  rebooting:'yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir',ERR_sharp_busy:'başka bir keskinlik işlemi sürüyor, 20 sn sonra tekrar deneyin',ERR_sd_write:'SD karta yazılamadı, hiçbir şey değişmedi',
  ERR_no_sd:'SD kart yok',ERR_no_loader:'clean/ içinde yükleyici ya da p2pcam.sqfs yok',ERR_unknown:'bilinmeyen komut',ERR_post_only:'komutlar yalnız düğmelerle çalışır',
+ md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet ve yeniden başlat',md_note:'Yeniden başlatınca uygulanır (yaklaşık 1 dakika). Bölge dışındaki hareket kaydedilmez. Takip açıkken bölgeler yok sayılır.',c_md:'Hareket ayarları kaydedilip kamera yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
  k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
  v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
  m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
@@ -415,6 +484,7 @@ function applyLang(){
   $('#ptoggle').textContent=t(open?'pv_stop':'pv_start');
   $('#logbtn').textContent=t($('#logs').hidden?'logs_show':'logs_hide');
   $('#gallery').href='http://'+host+':8090/cgi-bin/gal?lang='+lang;
+  drawMd();
   if(last)render(last);
 }
 document.querySelectorAll('[data-lang]').forEach(function(b){b.onclick=function(){lang=b.dataset.lang;try{localStorage.setItem('hc_lang',lang)}catch(e){}applyLang()}});
@@ -501,6 +571,57 @@ function status(){
     last=v;render(v);
   }).catch(function(){$('#badge').textContent=t('unreachable')});
 }
+// Motion settings. Zones are x,y,w,h on a 10x10 grid over the preview.
+var md={s:1,t:0,z:[]},editing=false,zb=$('#zonebox'),draft=null,start=null;
+function drawMd(){
+  document.querySelectorAll('[data-sens]').forEach(function(b){b.classList.toggle('on',+b.dataset.sens===md.s)});
+  document.querySelectorAll('[data-track]').forEach(function(b){b.classList.toggle('on',+b.dataset.track===md.t)});
+  $('#zinfo').textContent=md.z.length?t('z_n',md.z.length):t('z_all');
+  $('#zedit').textContent=t(editing?'z_done':'z_edit');
+  zb.textContent='';
+  md.z.forEach(function(r,i){zb.appendChild(box(r,'zone',i))});
+}
+function box(r,cls,i){var d=document.createElement('div');d.className=cls;if(i!==undefined)d.dataset.i=i;
+  d.style.left=r[0]*10+'%';d.style.top=r[1]*10+'%';d.style.width=r[2]*10+'%';d.style.height=r[3]*10+'%';return d}
+function cell(e){var b=zb.getBoundingClientRect();
+  return [Math.max(0,Math.min(9,Math.floor(10*(e.clientX-b.left)/b.width))),Math.max(0,Math.min(9,Math.floor(10*(e.clientY-b.top)/b.height)))]}
+function rect(a,b){var x=Math.min(a[0],b[0]),y=Math.min(a[1],b[1]);return [x,y,Math.abs(a[0]-b[0])+1,Math.abs(a[1]-b[1])+1]}
+zb.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  if(e.target.classList.contains('zone')){md.z.splice(+e.target.dataset.i,1);drawMd();return}
+  if(md.z.length>=25){msg(t('z_full'),'bad');return}
+  start=cell(e);draft=box(rect(start,start),'zone draft');zb.appendChild(draft);
+  try{zb.setPointerCapture(e.pointerId)}catch(_){}
+});
+zb.addEventListener('pointermove',function(e){
+  if(!start)return;var r=rect(start,cell(e));
+  draft.style.left=r[0]*10+'%';draft.style.top=r[1]*10+'%';draft.style.width=r[2]*10+'%';draft.style.height=r[3]*10+'%';
+});
+function endDraw(e){if(!start)return;var r=rect(start,cell(e));start=null;draft=null;md.z.push(r);drawMd()}
+zb.addEventListener('pointerup',endDraw);
+zb.addEventListener('pointercancel',function(){start=null;draft=null;drawMd()});
+$('#zedit').onclick=function(){editing=!editing;zb.hidden=!editing;$('#zhelp').hidden=!editing;drawMd();if(editing)$('#pvwrap').scrollIntoView({behavior:'smooth',block:'center'})};
+$('#zclear').onclick=function(){md.z=[];drawMd()};
+document.querySelectorAll('[data-sens]').forEach(function(b){b.onclick=function(){md.s=+b.dataset.sens;drawMd()}});
+document.querySelectorAll('[data-track]').forEach(function(b){b.onclick=function(){md.t=+b.dataset.track;drawMd()}});
+$('#mdsave').onclick=function(){
+  if(!confirm(t('c_md')))return;
+  var v='s'+md.s+'.t'+md.t+'.z'+md.z.map(function(r){return r.join('-')}).join('_');
+  msg(t('md_saving'));
+  fetch('webui?c=md_save&v='+v,{method:'POST',cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
+    x=x.trim();
+    if(x.indexOf('OK')!==0){var y=reply(x);msg(y[0],y[1]);return}
+    return send('reboot').then(function(){msg(t('md_rebooting'),'good')});
+  }).catch(function(){msg(t('neterr',t('md_save')),'bad')});
+};
+function loadMd(){
+  fetch('webui?s=md',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
+    x.split('\n').forEach(function(l){var i=l.indexOf('=');if(i<1)return;var k=l.slice(0,i),v=l.slice(i+1);
+      if(k==='sensitivity')md.s=+v||0;else if(k==='tracking')md.t=+v?1:0;
+      else if(k==='zones')md.z=v?v.split(';').map(function(z){return z.split(',').map(Number)}):[]});
+    drawMd();
+  }).catch(function(){});
+}
 $('#logbtn').onclick=function(){
   var p=$('#logs');
   if(!p.hidden){p.hidden=true;this.textContent=t('logs_show');return}
@@ -508,7 +629,7 @@ $('#logbtn').onclick=function(){
   fetch('webui?s=logs',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){p.textContent=x});
 };
 document.addEventListener('visibilitychange',function(){if(!document.hidden){status();next()}});
-applyLang();status();setInterval(status,5000);next();
+applyLang();status();loadMd();setInterval(status,5000);next();
 })();
 </script>
 </body>

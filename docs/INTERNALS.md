@@ -96,22 +96,33 @@ plain text.
 
 | Setting | Where | Notes |
 |---|---|---|
-| Alarm zones | `devParam.dat` 0x314 | i32 count (max 25) + 25 × {u8 x, y, w, h} in tenths of the frame (10×10 grid). Read by `checkMdAreparams` (`0x16dc8`) |
-| Zones enabled | `hwcfg.ini` `support_mdzone` | missing = 0 → zones are never loaded |
-| Real threshold | `hwcfg.ini` `motion_level` 0/1/2 | applied once at boot by `0x617bc`: moving blocks needed 15 / 4 / 1 (`md_setting_low/middle/high` override) |
+| Alarm zones | `devParam.dat` 0x314 | i32 count (max 25) + 25 × {u8 x, y, w, h} in tenths of the frame (10×10 grid). Read once when the event thread starts (`checkMdAreparams`, `0x16dc8`). Verified live |
+| Zone support | `support_mdzone` | 1 at runtime on this camera (`0x3a4ca8`, read from process memory) although neither `hwcfg.ini` nor a `defalut.config` sets it; what sets it is unknown |
+| Real threshold | `[config] motion_level` in `hwcfg.ini`, 0/1/2 | applied once at boot by `0x617bc`: moving blocks needed 15 / 4 / 1 (`md_setting_low/middle/high` override). Missing = 1. Verified live: `motion_level = 2` gives threshold 1 |
 | Level shown to the app | `devParam.dat` 0xe8 = 1/2/3 | only read back for the vendor app |
-| Motion tracking | `devParam.dat` 0x2d8 | |
-| Defence (armed) | `devParam.dat` 0x3d4 | |
-| Zone state | `devParam.dat` 0x3d5 | |
-| App event flags | `extraParam.dat` 0x1340–0x134d | `setMotEventStatus` 0x1346, `setMotionSensity` 0x134b, `setAreaSensity` 0x1349, … |
+| Motion tracking | `devParam.dat` 0x2d8 | while on, the zone check is skipped |
+| Event switches | `devParam.dat` 0x388 motion, 0x38c person, 0x390 sound | 2 = off (static analysis) |
+| Defence, zone state | `devParam.dat` 0x3d4, 0x3d5 | |
+| App event flags | `extraParam.dat` 0x1340–0x134d | `setMotEventStatus` 0x1346 (2 = no recording trigger), `setMotionSensity` 0x134b, `setAreaSensity` 0x1349, … |
 
-`hwcfg.ini` is read from `/home/hwcfg.ini` if present, else `/bak/hwcfg.ini`. `start.sh` copies a
-`/home/hwcfg.ini` to `/bak` on the next boot and deletes it.
+`FUN_00018fb8` reads keys from `[defalut]` in `/home/defalut.config` or `/bak/defalut.config`, but neither file
+exists on this camera, so the built-in defaults apply. `hwcfg.ini` (`[config]`) is read from
+`/home/hwcfg.ini` if present, else `/bak/hwcfg.ini`. `start.sh` moves a `/home/hwcfg.ini` to `/bak` on the next
+boot, which is a flash write; Plus avoids that with a bind mount.
+
+How a clip starts: the event thread (`0x340e4`) receives motion events; with `support_mdzone` on, an event that
+does not overlap a zone is dropped (`0x33a24`) unless tracking is on. A surviving event calls `FUN_00033218(1)`,
+which starts a 30 s event recording (`FUN_001d5a9e(0,2,0x1e)`). Zone count −1 means the whole frame.
 
 At runtime only the Tange command handler (`TCI_CMD_SETMOTIONDETECT`, `SET_MOTION_TRACKER_REQ`,
-`SET_MDAREA_STATE`, `SET_DEFENCE_REQ`) changes these. With the cloud disabled the way to change them is:
-edit the file, install it, reboot immediately (`p2pcam` rewrites the file from RAM on any setting change).
-`tools/devparam.py` reads and edits zones offline; writing to a camera is not tested yet.
+`SET_MDAREA_STATE`, `SET_DEFENCE_REQ`) changes these, and it is disabled here. Plus therefore applies them at
+boot, before `p2pcam` starts: `debug_cmd.sh` runs `clean/bin/mdcfg` (source `tools/mdcfg.c`) to build a RAM copy
+of `devParam.dat` from `clean/md.conf` and bind-mounts it over `/home/devParam.dat`, and does the same for
+`/bak/hwcfg.ini`. Flash stays untouched (verified by comparing md5 sums through a raw bind of `/home` and `/bak`).
+
+Runtime values can be read without changing anything:
+`dd if=/proc/<pid>/mem bs=4 skip=$((0x3a4ca8/4)) count=1`. Useful addresses in this build: `0x3a4ca8`
+`support_mdzone`, `0x3a4bf4` `motion_level`, `0x3f1b0c` threshold, `0x39ddf8` zone count, `0x3a8514` zones.
 
 Debug switches: `touch /tmp/md_info`, `/tmp/md_region`, `/tmp/track_info`, `/tmp/od_info` or
 `/tmp/hd_info` makes `p2pcam` print motion, zone, tracking and person-detection details (not tested yet).

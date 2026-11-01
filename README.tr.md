@@ -29,10 +29,12 @@ Ayrıca:
   panelin seçimini izler).
 - **Kayıt galerisi** (`:8090`): hareket olayları kart olarak (fotoğraf + klip), gün görünümü, tarayıcıda
   oynatma, indirme, silme, bir günü toplu silme, harici bir mail betiği için hareket maili anahtarı.
+- **Hareket ayarları** panelde: hassasiyet, takip ve canlı önizleme üzerinde çizilen en çok 25 alarm
+  bölgesi. Açılışta RAM'den uygulanır, bunlar da flash'a dokunmaz.
 - **Hareket fotoğrafları** (`mo.sh`): her hareket klibi için bir fotoğraf, klibe bağlı.
 - **Düzeltmeler:** RTSP soket arabelleğinin yanlış sokete verilmesi, loş ışıkta kayıtların saniye
   atlaması, 554 portunun LAN'dan RTSP dışı komut kabul etmesi.
-- **Araştırma:** hareket algılama ve alarm bölgelerinin nerede tutulduğu ve bunları düzenleyen bir araç
+- **Araştırma:** hareket algılama, bölgeler ve kaydın `p2pcam` içinde nasıl çalıştığı
   ([İÇ YAPI](docs/IC-YAPI.md)).
 
 ## Nasıl çalışır
@@ -43,7 +45,8 @@ güç verilir
      ├─ <SD>/debug_cmd.sh   (Plus yükleyicisi, kendini siler = tek seferlik)
      │    ├─ netguard.sh    bulut engeli (RAM kopyası)
      │    ├─ boot.sh        SD kartı bekler, sonra health.sh'yi çalıştırır
-     │    └─ clean/p2pcam.sqfs ve clean/sensor.sh'nin RAM kopyalarını /bak üzerine bağlar   (flash'a dokunmaz)
+     │    ├─ clean/p2pcam.sqfs ve clean/sensor.sh'nin RAM kopyalarını /bak üzerine bağlar   (flash'a dokunmaz)
+     │    └─ clean/md.conf'u devParam.dat ve hwcfg.ini'nin RAM kopyalarına uygular          (flash'a dokunmaz)
      ├─ sensor.sh → minihack.sh (temel hack: WiFi, telnet, FTP, httpd)
      └─ p2pcam (yamalı)
 health.sh  T+0 plus.sh (panel, galeri, hareket servisi)
@@ -105,8 +108,9 @@ sizi düz temel hack'e döndürür.
 
 - Yalnız tek firmware sürümü. Diğer sürümler için yeni adresler gerekir.
 - Tek kamerada denendi.
-- Hareket bölgeleri: şimdilik yalnız çevrim dışı araç, panelde yok. `hwcfg.ini` içinde
-  `support_mdzone=1` yoksa bölgeler yok sayılır ([İÇ YAPI](docs/IC-YAPI.md)).
+- Hareket ayarları yeniden başlatınca geçerli olur: çalışırken değiştirmenin tek yolu kapalı olan bulut
+  işleyicisi.
+- Takip açıkken kamera alarm bölgelerini yok sayar.
 - HTTPS yok (BusyBox httpd), bu yüzden panel çift yönlü ses için tarayıcı mikrofonunu kullanamaz.
 
 ## Teşekkür ve lisans
@@ -114,6 +118,7 @@ sizi düz temel hack'e döndürür.
 - Bu projenin üzerine kurulduğu ve ihtiyaç duyduğu [temel hack ve söküm](https://github.com/Jalecom/AJ_HC1703L_Teardown) için
   [@Jalecom](https://github.com/Jalecom) ve orada adı geçen katkıcılar.
 - Tarayıcıda oynatma için GPAC'ın mp4box.js 0.5.2 kütüphanesi (BSD 3-Clause) pakete dahildir.
+- `sdcard/clean/bin/mdcfg`, `tools/mdcfg.c`'nin statik ARM derlemesidir (derleme komutu kaynakta).
 - Bu depoda yalnız HC1703L Plus kodu vardır, MIT lisanslıdır ([LICENSE](LICENSE)). Temel hack pakete
   dahil değildir; kendi deposundan alınır.
 - Augentix ya da Tange ile bağlantısı yoktur. Üreticiye ait ikili dağıtılmaz. Kullanım sorumluluğu

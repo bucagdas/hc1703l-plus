@@ -65,4 +65,26 @@ if [ -f $C/sensor.sh ]; then
     say "sensor.sh not bound: flash sensor.sh"
   fi
 fi
+
+# Motion settings (clean/md.conf, written by the panel). RAM copies only: the files on flash stay as they are,
+# and a failure here just leaves the stock values in place.
+if [ -f $C/md.conf ]; then
+  if [ -f $C/bin/mdcfg ] && cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg &&
+     /tmp/mdcfg apply /home/devParam.dat /tmp/devParam.plus $C/md.conf &&
+     mount --bind /tmp/devParam.plus /home/devParam.dat; then
+    say "devParam bound"
+  else
+    say "devParam not bound: flash devParam"
+  fi
+  L=$(awk -F= '/^sensitivity=/{print $2}' $C/md.conf)
+  case "$L" in
+    0|2)
+      if cp /bak/hwcfg.ini /tmp/hwcfg.plus && printf '\nmotion_level = %s\n' "$L" >> /tmp/hwcfg.plus &&
+         mount --bind /tmp/hwcfg.plus /bak/hwcfg.ini; then
+        say "hwcfg bound"
+      else
+        say "hwcfg not bound"
+      fi ;;
+  esac
+fi
 sync

@@ -95,22 +95,33 @@ dosyayı `*_bak`'a kopyalar. `devParam.dat` WiFi SSID'sini (+0x100) ve parolası
 
 | Ayar | Yer | Not |
 |---|---|---|
-| Alarm bölgeleri | `devParam.dat` 0x314 | i32 sayı (en çok 25) + 25 × {u8 x, y, w, h}, birim görüntünün onda biri (10×10 ızgara). `checkMdAreparams` (`0x16dc8`) okur |
-| Bölgeler açık mı | `hwcfg.ini` `support_mdzone` | yoksa 0 → bölgeler hiç yüklenmez |
-| Gerçek eşik | `hwcfg.ini` `motion_level` 0/1/2 | açılışta bir kez `0x617bc` uygular: gereken hareketli blok 15 / 4 / 1 (`md_setting_low/middle/high` ile değişir) |
+| Alarm bölgeleri | `devParam.dat` 0x314 | i32 sayı (en çok 25) + 25 × {u8 x, y, w, h}, birim görüntünün onda biri (10×10 ızgara). Olay iş parçacığı başlarken bir kez okunur (`checkMdAreparams`, `0x16dc8`). Canlı doğrulandı |
+| Bölge desteği | `support_mdzone` | Bu kamerada çalışırken 1 (`0x3a4ca8`, süreç belleğinden okundu); oysa ne `hwcfg.ini` ne de bir `defalut.config` bunu ayarlıyor. Neyin ayarladığı bilinmiyor |
+| Gerçek eşik | `hwcfg.ini` içinde `[config] motion_level`, 0/1/2 | açılışta bir kez `0x617bc` uygular: gereken hareketli blok 15 / 4 / 1 (`md_setting_low/middle/high` ile değişir). Yoksa 1. Canlı doğrulandı: `motion_level = 2` eşiği 1 yapar |
 | Uygulamaya gösterilen seviye | `devParam.dat` 0xe8 = 1/2/3 | yalnız üretici uygulamasına geri bildirilir |
-| Hareket takibi | `devParam.dat` 0x2d8 | |
-| Savunma (kurulu) | `devParam.dat` 0x3d4 | |
-| Bölge durumu | `devParam.dat` 0x3d5 | |
-| Uygulama olay bayrakları | `extraParam.dat` 0x1340–0x134d | `setMotEventStatus` 0x1346, `setMotionSensity` 0x134b, `setAreaSensity` 0x1349, … |
+| Hareket takibi | `devParam.dat` 0x2d8 | açıkken bölge denetimi atlanır |
+| Olay anahtarları | `devParam.dat` 0x388 hareket, 0x38c kişi, 0x390 ses | 2 = kapalı (statik analiz) |
+| Savunma, bölge durumu | `devParam.dat` 0x3d4, 0x3d5 | |
+| Uygulama olay bayrakları | `extraParam.dat` 0x1340–0x134d | `setMotEventStatus` 0x1346 (2 = kayıt tetiklenmez), `setMotionSensity` 0x134b, `setAreaSensity` 0x1349, … |
 
-`hwcfg.ini` varsa `/home/hwcfg.ini`'den, yoksa `/bak/hwcfg.ini`'den okunur. `start.sh`, bir
-`/home/hwcfg.ini` bulursa bir sonraki açılışta `/bak`'a kopyalar ve siler.
+`FUN_00018fb8` anahtarları `/home/defalut.config` ya da `/bak/defalut.config` içindeki `[defalut]` bölümünden
+okur, ama bu kamerada iki dosya da yok; yerleşik varsayılanlar geçerli. `hwcfg.ini` (`[config]`) varsa
+`/home/hwcfg.ini`'den, yoksa `/bak/hwcfg.ini`'den okunur. `start.sh`, `/home/hwcfg.ini` bulursa bir sonraki
+açılışta `/bak`'a taşır; bu bir flash yazımıdır, Plus bind mount ile bundan kaçınır.
+
+Klip nasıl başlar: olay iş parçacığı (`0x340e4`) hareket olaylarını alır. `support_mdzone` açıkken bölgeyle
+kesişmeyen olay atılır (`0x33a24`), takip açıksa bu denetim atlanır. Geçen olay `FUN_00033218(1)`'i çağırır, o da
+30 sn'lik olay kaydını başlatır (`FUN_001d5a9e(0,2,0x1e)`). Bölge sayısı −1 bütün kare demektir.
 
 Çalışırken bunları yalnız Tange komut işleyicisi değiştirir (`TCI_CMD_SETMOTIONDETECT`,
-`SET_MOTION_TRACKER_REQ`, `SET_MDAREA_STATE`, `SET_DEFENCE_REQ`). Bulut kapalıyken yol şudur: dosyayı
-düzenle, kur, hemen yeniden başlat (`p2pcam` herhangi bir ayar değişince dosyayı RAM'den yeniden yazar).
-`tools/devparam.py` bölgeleri çevrim dışı okur ve düzenler; kameraya yazma henüz denenmedi.
+`SET_MOTION_TRACKER_REQ`, `SET_MDAREA_STATE`, `SET_DEFENCE_REQ`) ve o burada kapalıdır. Bu yüzden Plus ayarları
+açılışta, `p2pcam` başlamadan uygular: `debug_cmd.sh`, `clean/bin/mdcfg` (kaynak `tools/mdcfg.c`) ile
+`clean/md.conf`'tan `devParam.dat`'ın RAM kopyasını üretip `/home/devParam.dat` üzerine bağlar; `/bak/hwcfg.ini`
+için de aynısını yapar. Flash'a dokunulmaz (`/home` ve `/bak` ham bind ile md5 karşılaştırmasıyla doğrulandı).
+
+Çalışan değerler hiçbir şey değiştirmeden okunabilir:
+`dd if=/proc/<pid>/mem bs=4 skip=$((0x3a4ca8/4)) count=1`. Bu sürümdeki adresler: `0x3a4ca8` `support_mdzone`,
+`0x3a4bf4` `motion_level`, `0x3f1b0c` eşik, `0x39ddf8` bölge sayısı, `0x3a8514` bölgeler.
 
 Hata ayıklama anahtarları: `touch /tmp/md_info`, `/tmp/md_region`, `/tmp/track_info`, `/tmp/od_info` ya da
 `/tmp/hd_info`, `p2pcam`'in hareket, bölge, takip ve kişi algılama ayrıntısını yazdırmasını sağlar
