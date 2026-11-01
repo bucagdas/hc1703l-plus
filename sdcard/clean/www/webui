@@ -8,7 +8,7 @@
 #   GET  webui?s=status|snap|logs   machine-readable status | JPEG snapshot | plain-text logs
 #   GET  webui?s=md                 motion settings (sensitivity, tracking, zones)
 #   POST webui?c=COMMAND            command; replies "OK [code args]" or "ERR code".
-#   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; the loader applies it on the next boot
+#   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; sensitivity and tracking apply at once, zones at the next boot
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
 R=/tmp/mnt/mmc01/0
@@ -119,6 +119,16 @@ ready_for_reboot(){
 # Motion settings live in clean/md.conf on the SD card. debug_cmd.sh applies them to RAM copies at boot,
 # so nothing is written to flash. mdcfg validates the zones before the file is replaced.
 tool(){ [ -x /tmp/mdcfg ] || { cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg; }; [ -x /tmp/mdcfg ]; }
+# Apply sensitivity and tracking to the running p2pcam, only on the patched build whose addresses we know (mdcfg
+# checks them too). A zone change returns 1: p2pcam reads zones at boot, so the panel offers a reboot.
+md_live(){
+  [ -f /tmp/p2pcam.clean.sqfs ] || return 1
+  tool || return 1
+  [ "$(/tmp/mdcfg show /home/devParam.dat | grep '^zones=')" = "$(grep '^zones=' $C/md.conf)" ] || return 1
+  pid=$(ps | awk '/\/p2pcam\/p2pcam/ && !/awk/{print $1; exit}')
+  [ -n "$pid" ] && [ "$(md /proc/$pid/exe)" = "$(cat $C/p2pcam.md5 2>/dev/null)" ] || return 1
+  /tmp/mdcfg live "$pid" $C/md.conf
+}
 md_read(){
   sens=1; if [ -f $C/md.conf ]; then cat $C/md.conf; else tool && /tmp/mdcfg show /home/devParam.dat; echo "sensitivity=1"; fi
 }
@@ -141,8 +151,7 @@ md_save(){
   if ! /tmp/mdcfg apply /home/devParam.dat $n.out $n; then rm -f $n $n.out; echo "ERR invalid"; return 1; fi
   rm -f $n.out
   if cp $n $C/md.new && sync && mv -f $C/md.new $C/md.conf && sync; then rm -f $n; else rm -f $n $C/md.new; echo "ERR sd_write"; return 1; fi
-  ready_for_reboot
-  echo "OK md_saved"
+  if md_live; then echo "OK md_live"; else ready_for_reboot; echo "OK md_saved"; fi
 }
 
 command(){
@@ -462,7 +471,7 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  OK:'done',sharp_applied:'sharpness {0} applied and saved',sharp_saved:'sharpness {0} saved, applied when day mode starts',
  rebooting:'rebooting, the page is back in about a minute',ERR_sharp_busy:'another sharpness change is running, try again in 20 s',ERR_sd_write:'could not write to the SD card, nothing changed',
  ERR_no_sd:'no SD card',ERR_no_loader:'loader or p2pcam.sqfs missing in clean/',ERR_unknown:'unknown command',ERR_post_only:'commands only work from the buttons',
- md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',g_hide:'Hide grid',g_show:'Show grid',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save and reboot',md_note:'Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once it reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.',c_md:'Save the motion settings and reboot the camera? No video and no recording for about a minute.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
+ md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',g_hide:'Hide grid',g_show:'Show grid',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save',md_note:'Sensitivity and tracking apply at once, zones after a reboot. Motion outside the zones is not recorded. With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once it reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.',c_md:'Saved. This change needs a reboot. Reboot now? No video and no recording for about a minute.',md_applied:'Saved and applied.',md_later:'Saved. It applies after the next reboot.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
  k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
  v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
  m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
@@ -482,7 +491,7 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  OK:'tamam',sharp_applied:'keskinlik {0} uygulandı ve kaydedildi',sharp_saved:'keskinlik {0} kaydedildi, gündüz moduna geçince uygulanır',
  rebooting:'yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir',ERR_sharp_busy:'başka bir keskinlik işlemi sürüyor, 20 sn sonra tekrar deneyin',ERR_sd_write:'SD karta yazılamadı, hiçbir şey değişmedi',
  ERR_no_sd:'SD kart yok',ERR_no_loader:'clean/ içinde yükleyici ya da p2pcam.sqfs yok',ERR_unknown:'bilinmeyen komut',ERR_post_only:'komutlar yalnız düğmelerle çalışır',
- md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',g_hide:'Izgarayı gizle',g_show:'Izgarayı göster',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet ve yeniden başlat',md_note:'Yeniden başlatınca uygulanır (yaklaşık 1 dakika). Bölge dışındaki hareket kaydedilmez. Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.',c_md:'Hareket ayarları kaydedilip kamera yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
+ md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',g_hide:'Izgarayı gizle',g_show:'Izgarayı göster',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet',md_note:'Hassasiyet ve takip hemen uygulanır, bölgeler yeniden başlatınca. Bölge dışındaki hareket kaydedilmez. Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.',c_md:'Kaydedildi. Bu değişiklik için yeniden başlatma gerekiyor. Şimdi yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_applied:'Kaydedildi ve uygulandı.',md_later:'Kaydedildi. Bir sonraki yeniden başlatmada uygulanır.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
  k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
  v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
  m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
@@ -629,12 +638,13 @@ $('#zclear').onclick=function(){md.z=[];drawMd()};
 document.querySelectorAll('[data-sens]').forEach(function(b){b.onclick=function(){md.s=+b.dataset.sens;drawMd()}});
 document.querySelectorAll('[data-track]').forEach(function(b){b.onclick=function(){md.t=+b.dataset.track;drawMd()}});
 $('#mdsave').onclick=function(){
-  if(!confirm(t('c_md')))return;
   var v='s'+md.s+'.t'+md.t+'.z'+md.z.map(function(r){return r.join('-')}).join('_');
   msg(t('md_saving'));
   fetch('webui?c=md_save&v='+v,{method:'POST',cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
     x=x.trim();
     if(x.indexOf('OK')!==0){var y=reply(x);msg(y[0],y[1]);return}
+    if(x==='OK md_live'){msg(t('md_applied'),'good');return}
+    if(!confirm(t('c_md'))){msg(t('md_later'));return}
     return send('reboot').then(function(){msg(t('md_rebooting'),'good')});
   }).catch(function(){msg(t('neterr',t('md_save')),'bad')});
 };

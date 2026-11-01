@@ -5,6 +5,7 @@
  * the SD card restores the original behaviour.
  *
  *   mdcfg apply <devParam.dat> <out> <md.conf>     exit 0 on success, the output has a valid checksum
+ *   mdcfg live  <p2pcam pid> <md.conf>             apply sensitivity and tracking to the running p2pcam, RAM only
  *   mdcfg show  <devParam.dat>                     print the motion fields (never the Wi-Fi credentials)
  *
  * md.conf lines (unknown keys are ignored):
@@ -19,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define FILE_SIZE 1004
 #define MAGIC 0x20150910u
@@ -29,6 +32,11 @@
 #define OFF_ZSTATE 0x3d5
 #define MAX_ZONES 25
 #define EVENT_OFF 2
+
+/* Addresses in the supported p2pcam build. live() refuses to write unless the first two check out. */
+#define VA_SIG    0x22a484u  /* "support_ymv" in the read-only data */
+#define VA_DEVPTR 0x39ddc0u  /* pointer to the RAM copy of devParam.dat, same layout as the file */
+#define VA_THRESH 0x3f1b0cu  /* moving blocks needed for an event */
 
 static uint8_t b[FILE_SIZE];
 
@@ -108,6 +116,49 @@ static int apply(const char *in, const char *out, const char *conf)
     return 0;
 }
 
+static int mem_put(int fd, uint32_t va, int32_t v)
+{
+    return pwrite(fd, &v, 4, va) == 4 ? 0 : -1;
+}
+
+/* Sensitivity and tracking only: p2pcam reads both from memory every time. Zones are left out on purpose:
+ * zones written to memory were not picked up during motion, so they stay boot-only.
+ * Everything is checked before the first write. */
+static int live(int pid, const char *conf)
+{
+    static const int thresh[] = { 15, 4, 1 };
+    char line[256], path[32];
+    int sens = -1, track = -1;
+    FILE *f = fopen(conf, "r");
+    if (!f) { fprintf(stderr, "mdcfg: no conf\n"); return 1; }
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *v = strchr(line, '=');
+        if (!v) continue;
+        *v++ = 0;
+        if (!strcmp(line, "sensitivity")) sens = atoi(v);
+        else if (!strcmp(line, "tracking")) track = atoi(v) ? 1 : 0;
+    }
+    fclose(f);
+    if (sens < 0 || sens > 2 || track < 0) { fprintf(stderr, "mdcfg: bad conf\n"); return 1; }
+
+    snprintf(path, sizeof path, "/proc/%d/mem", pid);
+    int fd = open(path, O_RDWR);
+    if (fd < 0) { perror(path); return 1; }
+    char sig[12];
+    uint32_t dev = 0, magic = 0;
+    if (pread(fd, sig, sizeof sig, VA_SIG) != sizeof sig || memcmp(sig, "support_ymv", sizeof sig) ||
+        pread(fd, &dev, 4, VA_DEVPTR) != 4 || pread(fd, &magic, 4, dev) != 4 || magic != MAGIC) {
+        fprintf(stderr, "mdcfg: unsupported p2pcam build\n");
+        close(fd);
+        return 1;
+    }
+    int bad = mem_put(fd, VA_THRESH, thresh[sens]) | mem_put(fd, dev + OFF_TRACK, track);
+    close(fd);
+    if (bad) { fprintf(stderr, "mdcfg: write failed\n"); return 1; }
+    return 0;
+}
+
 static int show(const char *in)
 {
     if (load(in)) { fprintf(stderr, "mdcfg: bad input\n"); return 1; }
@@ -126,6 +177,7 @@ int main(int argc, char **argv)
 {
     if (argc == 5 && !strcmp(argv[1], "apply")) return apply(argv[2], argv[3], argv[4]);
     if (argc == 3 && !strcmp(argv[1], "show")) return show(argv[2]);
-    fprintf(stderr, "usage: mdcfg apply <in> <out> <conf> | mdcfg show <in>\n");
+    if (argc == 4 && !strcmp(argv[1], "live")) return live(atoi(argv[2]), argv[3]);
+    fprintf(stderr, "usage: mdcfg apply <in> <out> <conf> | mdcfg live <pid> <conf> | mdcfg show <in>\n");
     return 2;
 }

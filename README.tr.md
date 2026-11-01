@@ -31,7 +31,8 @@ Ayrıca:
   oynatma, indirme, silme, birden çok olayı seçip birlikte silme, bir günü toplu silme, harici bir mail betiği
   için hareket maili anahtarı.
 - **Hareket ayarları** panelde: hassasiyet, takip ve canlı önizleme üzerinde çizilen en çok 25 alarm
-  bölgesi. Açılışta RAM'den uygulanır, bunlar da flash'a dokunmaz.
+  bölgesi. Hassasiyet ve takip hemen, bölgeler yeniden başlatınca uygulanır. Her şey RAM'de kalır, ayarlar da
+  flash'a dokunmaz.
 - **Hareket fotoğrafları** (`mo.sh`): her hareket klibi için bir fotoğraf, klibe bağlı.
 - **Düzeltmeler:** RTSP soket arabelleğinin yanlış sokete verilmesi, loş ışıkta kayıtların saniye
   atlaması, 554 portunun LAN'dan RTSP dışı komut kabul etmesi.
@@ -111,8 +112,7 @@ değiştirmek kamerayı stoğa düşürmez.
 
 - Yalnız tek firmware sürümü. Diğer sürümler için yeni adresler gerekir.
 - Tek kamerada denendi.
-- Hareket ayarları yeniden başlatınca geçerli olur: çalışırken değiştirmenin tek yolu kapalı olan bulut
-  işleyicisi.
+- Bölge değişikliği için yeniden başlatma gerekir. Çalışan `p2pcam`'e yazılan bölgeler okunmadı.
 - Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ
   çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.
 - Takip, görüntünün orta yarısındaki kişiyi izlemez; kameraya tam önden yaklaşan kişi izlenmez. Dikey hareket

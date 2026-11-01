@@ -125,6 +125,12 @@ boot, before `p2pcam` starts: `debug_cmd.sh` runs `clean/bin/mdcfg` (source `too
 of `devParam.dat` from `clean/md.conf` and bind-mounts it over `/home/devParam.dat`, and does the same for
 `/bak/hwcfg.ini`. Flash stays untouched (verified by comparing md5 sums through a raw bind of `/home` and `/bak`).
 
+`mdcfg live` also writes sensitivity (`0x3f1b0c`) and tracking (devParam RAM copy + 0x2d8) to the running `p2pcam`
+through `/proc/<pid>/mem`, RAM only. It checks a string in the read-only data and the devParam magic first, and the
+panel also compares the running binary with `clean/p2pcam.md5`. Tracking was seen working after a live write.
+Zones stay boot-only: with zones written to `0x3a8514`, count to `0x39ddf8` and flag `0x3a86a4` set, motion started
+clips and even a camera move did not clear the flag, so `0x33a24` was not reached.
+
 Runtime values can be read without changing anything:
 `dd if=/proc/<pid>/mem bs=4 skip=$((0x3a4ca8/4)) count=1`. Useful addresses in this build: `0x3a4ca8`
 `support_mdzone`, `0x3a4bf4` `motion_level`, `0x3f1b0c` threshold, `0x39ddf8` zone count, `0x3a8514` zones.

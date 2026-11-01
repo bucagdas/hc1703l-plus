@@ -124,6 +124,12 @@ açılışta, `p2pcam` başlamadan uygular: `debug_cmd.sh`, `clean/bin/mdcfg` (k
 `clean/md.conf`'tan `devParam.dat`'ın RAM kopyasını üretip `/home/devParam.dat` üzerine bağlar; `/bak/hwcfg.ini`
 için de aynısını yapar. Flash'a dokunulmaz (`/home` ve `/bak` ham bind ile md5 karşılaştırmasıyla doğrulandı).
 
+`mdcfg live`, hassasiyeti (`0x3f1b0c`) ve takibi (devParam RAM kopyası + 0x2d8) `/proc/<pid>/mem` üzerinden çalışan
+`p2pcam`'e de yazar; yalnız RAM. Önce salt okunur veridaki bir dizgiyi ve devParam sihirli sayısını denetler, panel
+de çalışan ikiliyi `clean/p2pcam.md5` ile karşılaştırır. Canlı yazmadan sonra takibin çalıştığı görüldü. Bölgeler
+yalnız açılışta geçerlidir: bölgeler `0x3a8514`'e, sayı `0x39ddf8`'e yazılıp `0x3a86a4` bayrağı kurulduğunda hareket
+klip başlattı, kamera hareketi bile bayrağı temizlemedi; yani `0x33a24`'e ulaşılmadı.
+
 Çalışan değerler hiçbir şey değiştirmeden okunabilir:
 `dd if=/proc/<pid>/mem bs=4 skip=$((0x3a4ca8/4)) count=1`. Bu sürümdeki adresler: `0x3a4ca8` `support_mdzone`,
 `0x3a4bf4` `motion_level`, `0x3f1b0c` eşik, `0x39ddf8` bölge sayısı, `0x3a8514` bölgeler.

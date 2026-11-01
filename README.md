@@ -30,7 +30,8 @@ Plus also adds:
   playback, download, delete, select several events and delete them together, delete a whole day, a motion
   e-mail switch for an external mailer.
 - **Motion settings** in the panel: sensitivity, tracking and up to 25 alarm zones drawn on the live
-  preview. Applied from RAM at boot, so they do not touch flash either.
+  preview. Sensitivity and tracking apply at once; zones after a reboot. Everything stays in RAM, so settings do
+  not touch flash either.
 - **Motion snapshots** (`mo.sh`): one snapshot per motion clip, linked to it.
 - **Fixes:** RTSP socket buffer on the wrong socket, recordings skipping seconds in dim light, vendor
   port 554 accepting non-RTSP commands from the LAN.
@@ -108,7 +109,7 @@ in a row do not drop the camera to stock.
 
 - One firmware build only. Other builds need new offsets.
 - Tested on one camera.
-- Motion settings need a reboot to take effect: the only runtime path is the disabled cloud handler.
+- A zone change needs a reboot. Zones written to the running `p2pcam` were not picked up.
 - With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once that motion
   reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.
 - Tracking does not follow someone in the middle half of the frame, so a person walking straight at the camera
