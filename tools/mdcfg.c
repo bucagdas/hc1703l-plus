@@ -6,6 +6,7 @@
  *
  *   mdcfg apply <devParam.dat> <out> <md.conf>     exit 0 on success, the output has a valid checksum
  *   mdcfg live  <p2pcam pid> <md.conf>             apply sensitivity and tracking to the running p2pcam, RAM only
+ *   mdcfg image <p2pcam pid>                       print the selected image mode: 0 auto, 1 day, 2 night
  *   mdcfg show  <devParam.dat>                     print the motion fields (never the Wi-Fi credentials)
  *
  * md.conf lines (unknown keys are ignored):
@@ -30,6 +31,7 @@
 #define OFF_MOTION 0x388
 #define OFF_HUMAN 0x38c
 #define OFF_ZSTATE 0x3d5
+#define OFF_IMAGE 0xfa
 #define MAX_ZONES 25
 #define EVENT_OFF 2
 
@@ -121,13 +123,43 @@ static int mem_put(int fd, uint32_t va, int32_t v)
     return pwrite(fd, &v, 4, va) == 4 ? 0 : -1;
 }
 
+/* Open the memory of p2pcam and prove it is the supported build. Returns the fd, or -1. */
+static int open_mem(int pid, int flags, uint32_t *dev)
+{
+    char path[32], sig[12];
+    uint32_t magic = 0;
+    snprintf(path, sizeof path, "/proc/%d/mem", pid);
+    int fd = open(path, flags);
+    if (fd < 0) { perror(path); return -1; }
+    if (pread(fd, sig, sizeof sig, VA_SIG) != sizeof sig || memcmp(sig, "support_ymv", sizeof sig) ||
+        pread(fd, dev, 4, VA_DEVPTR) != 4 || pread(fd, &magic, 4, *dev) != 4 || magic != MAGIC) {
+        fprintf(stderr, "mdcfg: unsupported p2pcam build\n");
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static int image(int pid)
+{
+    uint32_t dev = 0;
+    uint8_t v = 0;
+    int fd = open_mem(pid, O_RDONLY, &dev);
+    if (fd < 0) return 1;
+    int ok = pread(fd, &v, 1, dev + OFF_IMAGE) == 1 && v <= 2;
+    close(fd);
+    if (!ok) return 1;
+    printf("%d\n", v);
+    return 0;
+}
+
 /* Sensitivity and tracking only: p2pcam reads both from memory every time. Zones are left out on purpose:
  * zones written to memory were not picked up during motion, so they stay boot-only.
  * Everything is checked before the first write. */
 static int live(int pid, const char *conf)
 {
     static const int thresh[] = { 15, 4, 1 };
-    char line[256], path[32];
+    char line[256];
     int sens = -1, track = -1;
     FILE *f = fopen(conf, "r");
     if (!f) { fprintf(stderr, "mdcfg: no conf\n"); return 1; }
@@ -142,17 +174,9 @@ static int live(int pid, const char *conf)
     fclose(f);
     if (sens < 0 || sens > 2 || track < 0) { fprintf(stderr, "mdcfg: bad conf\n"); return 1; }
 
-    snprintf(path, sizeof path, "/proc/%d/mem", pid);
-    int fd = open(path, O_RDWR);
-    if (fd < 0) { perror(path); return 1; }
-    char sig[12];
-    uint32_t dev = 0, magic = 0;
-    if (pread(fd, sig, sizeof sig, VA_SIG) != sizeof sig || memcmp(sig, "support_ymv", sizeof sig) ||
-        pread(fd, &dev, 4, VA_DEVPTR) != 4 || pread(fd, &magic, 4, dev) != 4 || magic != MAGIC) {
-        fprintf(stderr, "mdcfg: unsupported p2pcam build\n");
-        close(fd);
-        return 1;
-    }
+    uint32_t dev = 0;
+    int fd = open_mem(pid, O_RDWR, &dev);
+    if (fd < 0) return 1;
     int bad = mem_put(fd, VA_THRESH, thresh[sens]) | mem_put(fd, dev + OFF_TRACK, track);
     close(fd);
     if (bad) { fprintf(stderr, "mdcfg: write failed\n"); return 1; }
@@ -178,6 +202,7 @@ int main(int argc, char **argv)
     if (argc == 5 && !strcmp(argv[1], "apply")) return apply(argv[2], argv[3], argv[4]);
     if (argc == 3 && !strcmp(argv[1], "show")) return show(argv[2]);
     if (argc == 4 && !strcmp(argv[1], "live")) return live(atoi(argv[2]), argv[3]);
-    fprintf(stderr, "usage: mdcfg apply <in> <out> <conf> | mdcfg live <pid> <conf> | mdcfg show <in>\n");
+    if (argc == 3 && !strcmp(argv[1], "image")) return image(atoi(argv[2]));
+    fprintf(stderr, "usage: mdcfg apply <in> <out> <conf> | mdcfg live <pid> <conf> | mdcfg image <pid> | mdcfg show <in>\n");
     return 2;
 }

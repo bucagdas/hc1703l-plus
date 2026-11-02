@@ -119,15 +119,33 @@ ready_for_reboot(){
 # Motion settings live in clean/md.conf on the SD card. debug_cmd.sh applies them to RAM copies at boot,
 # so nothing is written to flash. mdcfg validates the zones before the file is replaced.
 tool(){ [ -x /tmp/mdcfg ] || { cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg; }; [ -x /tmp/mdcfg ]; }
+p2p_pid(){ ps | awk '/\/p2pcam\/p2pcam/ && !/awk/{print $1; exit}'; }
 # Apply sensitivity and tracking to the running p2pcam, only on the patched build whose addresses we know (mdcfg
 # checks them too). A zone change returns 1: p2pcam reads zones at boot, so the panel offers a reboot.
 md_live(){
   [ -f /tmp/p2pcam.clean.sqfs ] || return 1
   tool || return 1
   [ "$(/tmp/mdcfg show /home/devParam.dat | grep '^zones=')" = "$(grep '^zones=' $C/md.conf)" ] || return 1
-  pid=$(ps | awk '/\/p2pcam\/p2pcam/ && !/awk/{print $1; exit}')
+  pid=$(p2p_pid)
   [ -n "$pid" ] && [ "$(md /proc/$pid/exe)" = "$(cat $C/p2pcam.md5 2>/dev/null)" ] || return 1
   /tmp/mdcfg live "$pid" $C/md.conf
+}
+# Saved camera positions: clean/ptz.conf on the SD card, lines "1=x,y". Slots 1 to 4.
+ptz_tool(){ [ -x /tmp/ptzpos ] || { cp $C/bin/ptzpos /tmp/ptzpos && chmod 755 /tmp/ptzpos; }; [ -x /tmp/ptzpos ]; }
+ptz_save(){
+  case "$v" in [1-4]) ;; *) echo "ERR invalid"; return 1 ;; esac
+  ptz_tool || { echo "ERR no_sd"; return 1; }
+  set -- $(/tmp/ptzpos get); [ -n "$2" ] || { echo "ERR ptz"; return 1; }
+  { [ -f $C/ptz.conf ] && grep -v "^$v=" $C/ptz.conf; echo "$v=$1,$2"; } > /tmp/ptz.new
+  if cp /tmp/ptz.new $C/ptz.tmp && sync && mv -f $C/ptz.tmp $C/ptz.conf && sync; then echo "OK"; else rm -f $C/ptz.tmp; echo "ERR sd_write"; fi
+  rm -f /tmp/ptz.new
+}
+ptz_go(){
+  case "$v" in [1-4]) ;; *) echo "ERR invalid"; return 1 ;; esac
+  ptz_tool || { echo "ERR no_sd"; return 1; }
+  p=$(awk -F= -v k="$v" '$1==k{print $2; exit}' $C/ptz.conf 2>/dev/null)
+  [ -n "$p" ] || { echo "ERR empty"; return 1; }
+  /tmp/ptzpos go ${p%,*} ${p#*,} && echo "OK" || echo "ERR ptz"
 }
 md_read(){
   sens=1; if [ -f $C/md.conf ]; then cat $C/md.conf; else tool && /tmp/mdcfg show /home/devParam.dat; echo "sensitivity=1"; fi
@@ -191,6 +209,8 @@ command(){
     next_stock)   next_stock; return ;;
     next_patched) next_patched; return ;;
     md_save)      md_save; return ;;
+    ptz_save)     ptz_save; return ;;
+    ptz_go)       ptz_go; return ;;
     reboot) ready_for_reboot
             ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
             echo "OK rebooting"; return ;;
@@ -207,6 +227,11 @@ status(){
   elif [ -f $R/debug_cmd.sh ]; then echo "next=patched"
   else echo "next=stock_pending"; fi
   find_mode; echo "mode=$mode"
+  a=$(gio -g 12 2>/dev/null | awk '/gio.value/{print $3}'); echo "wl=$a"
+  a=$(gio -g 77 2>/dev/null | awk '/gio.value/{print $3}'); [ "$a" = 0 ] && echo "ir=1" || echo "ir=0"
+  if ptz_tool; then echo "ptz=$(/tmp/ptzpos get 2>/dev/null)"; [ -f $C/ptz.conf ] && sed 's/^/preset/' $C/ptz.conf; fi
+  # mode is what the camera runs now; image is what was selected (0 auto, 1 day, 2 night)
+  pid=$(p2p_pid); [ -n "$pid" ] && tool && echo "image=$(/tmp/mdcfg image "$pid" 2>/dev/null)"
   echo "sharpness=$(shp_read /tmp/sensor_day.ini)"
   awk '/^MemAvailable/{print "mem_kb=" $2}' /proc/meminfo
   top -b -n 1 2>/dev/null | awk '/^CPU:/{for(i=1;i<=NF;i++) if($(i+1)=="idle"){v=$i; sub(/%/,"",v); print "cpu=" 100-v; exit}}'
@@ -282,7 +307,6 @@ main{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-colu
 .bottom .wide{grid-column:1/-1}
 @media (max-width:1040px){.bottom{grid-template-columns:repeat(2,minmax(0,1fr))}.bottom>.card:nth-child(3){grid-column:1/-1}}
 @media (max-width:780px){main{grid-template-columns:1fr;padding:12px}.bottom{grid-template-columns:minmax(0,1fr)}}
-@media (max-width:360px){.copy{flex-wrap:wrap}}
 .col{display:flex;flex-direction:column;gap:16px;min-width:0}
 .col>.card:last-child{flex:1}
 .card.live{display:flex;flex-direction:column}
@@ -306,6 +330,8 @@ button.danger:active{color:#fff;background:var(--bad);border-color:var(--bad)}
 .ptz-wrap{display:flex;justify-content:center;align-items:center;flex:1;margin-top:12px}
 .ptz{display:grid;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(3,50px);gap:6px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .ptz button{padding:0;font-size:20px;touch-action:none}
+.presets{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.presets .row{justify-content:center}
 .ptz span{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
 .note{font-size:12px;color:var(--muted);margin:6px 0 0}
 dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0;font-size:14px}
@@ -313,7 +339,8 @@ dt{color:var(--muted)}
 dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 dd.good{color:var(--good)} dd.bad{color:var(--bad)}
 input[readonly]{font:12px ui-monospace,Menlo,monospace;width:100%;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
-.copy{display:flex;gap:8px;margin-top:6px}
+.copy{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.copy input{flex:1 1 250px;min-width:0}
 a{color:var(--accent)}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;max-height:360px;overflow:auto;background:var(--bg);padding:10px;border-radius:6px;margin:10px 0 0}
 details>summary{cursor:pointer;font-weight:600}
@@ -350,6 +377,16 @@ footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
           <button type="button" data-c="ptzrd" data-name="down_right" data-i18n-title="t_step">&#11018;</button>
         </div>
       </div>
+      <div class="presets">
+        <span id="ptzat"></span>
+        <div class="row">
+          <button type="button" data-preset="1">1</button>
+          <button type="button" data-preset="2">2</button>
+          <button type="button" data-preset="3">3</button>
+          <button type="button" data-preset="4">4</button>
+          <button type="button" id="psave" data-i18n="p_save">Save here</button>
+        </div>
+      </div>
       <p class="note" style="text-align:center" data-i18n="ptz_note">Arrows move while held; corners take one short step.</p>
     </section>
   </div>
@@ -360,14 +397,12 @@ footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
       <div class="row">
         <button type="button" data-c="day" data-mode="day" data-name="day" data-i18n="day">Day</button>
         <button type="button" data-c="night" data-mode="night" data-name="night" data-i18n="night">Night</button>
-        <button type="button" data-c="auto" data-name="auto" data-i18n="auto">Auto</button>
+        <button type="button" data-c="auto" data-mode="auto" data-name="auto" data-i18n="auto">Auto</button>
       </div>
       <h3 data-i18n="lights">Lights</h3>
       <div class="row">
-        <button type="button" data-c="wl_on" data-name="wl_on" data-i18n="wl_on">White light on</button>
-        <button type="button" data-c="wl_off" data-name="wl_off" data-i18n="wl_off">White light off</button>
-        <button type="button" data-c="ir_on" data-name="ir_on" data-i18n="ir_on">IR light on</button>
-        <button type="button" data-c="ir_off" data-name="ir_off" data-i18n="ir_off">IR light off</button>
+        <button type="button" id="wl" data-toggle="wl" data-i18n="wl" aria-pressed="false">White light</button>
+        <button type="button" id="ir" data-toggle="ir" data-i18n="ir" aria-pressed="false">IR light</button>
       </div>
       <h3 data-i18n="sharp_title">Sharpness (day)</h3>
       <div class="row">
@@ -459,7 +494,7 @@ var L={
 en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview',connecting:'Connecting…',pv_stop:'Stop preview',pv_start:'Start preview',
  pv_note:'About 1 frame per second, 640×360. Use the RTSP address for full quality.',pv_live:'Live',pv_fail:'No image, retrying…',pv_stopped:'Stopped',
  ptz_label:'Camera direction',t_step:'One short step',t_hold:'Hold to move',ptz_note:'Arrows move while held; corners take one short step.',
- controls:'Controls',image_mode:'Image mode',day:'Day',night:'Night',auto:'Auto',lights:'Lights',wl_on:'White light on',wl_off:'White light off',ir_on:'IR light on',ir_off:'IR light off',
+ controls:'Controls',image_mode:'Image mode',day:'Day',night:'Night',auto:'Auto',lights:'Lights',wl:'White light',ir:'IR light',pos_now:'Pan {0} / {1}, tilt {2} / {3}',p_save:'Save here',p_pick:'Pick a number to save this position',p_empty:'Empty',p_saved:'Position {0} saved',p_going:'Moving to position {0}…',p_there:'At position {0}',ERR_empty:'nothing saved there',ERR_ptz:'the camera did not answer',
  sharp_title:'Sharpness (day)',sharp125:'125 · soft',sharp140:'140 · default',sharp170:'170 · sharp',sharp:'Sharpness',sharp_note:'Saved on the SD card and kept after a reboot. Applied at once in day mode.',
  status:'Status',links:'Links',gallery:'Recordings (8090)',rtsp_title:'RTSP (VLC etc.)',copy:'Copy',copied:'RTSP address copied',
  maint:'Maintenance',reboot:'Reboot',logs_show:'Show logs',logs_hide:'Hide logs',loading:'Loading…',next_title:'On next boot',use_patched:'Patched build',use_stock:'Stock firmware',
@@ -474,12 +509,12 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',g_hide:'Hide grid',g_show:'Show grid',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save',md_note:'Sensitivity and tracking apply at once, zones after a reboot. Motion outside the zones is not recorded. With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once it reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.',c_md:'Saved. This change needs a reboot. Reboot now? No video and no recording for about a minute.',md_applied:'Saved and applied.',md_later:'Saved. It applies after the next reboot.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
  k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
  v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
- m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
+ m_auto:'Auto ({0})',m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
  v_sd:'{0} used of {1} ({2}%)',v_cpu:'{0}% in use',v_persistent:'Persistent (/bak)',d:'d',h:'h',min:'min'},
 tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera önizlemesi',connecting:'Bağlanıyor…',pv_stop:'Önizlemeyi durdur',pv_start:'Önizlemeyi başlat',
  pv_note:'Saniyede yaklaşık 1 kare, 640×360. Tam kalite için RTSP adresini kullanın.',pv_live:'Canlı',pv_fail:'Görüntü alınamadı, yeniden deneniyor…',pv_stopped:'Durduruldu',
  ptz_label:'Kamera yönü',t_step:'Kısa bir adım',t_hold:'Basılı tutun',ptz_note:'Oklar basılı tutulduğu sürece döner; köşeler kısa bir adım atar.',
- controls:'Kontroller',image_mode:'Görüntü modu',day:'Gündüz',night:'Gece',auto:'Otomatik',lights:'Işıklar',wl_on:'Beyaz ışık aç',wl_off:'Beyaz ışık kapat',ir_on:'IR ışık aç',ir_off:'IR ışık kapat',
+ controls:'Kontroller',image_mode:'Görüntü modu',day:'Gündüz',night:'Gece',auto:'Otomatik',lights:'Işıklar',wl:'Beyaz ışık',ir:'Kızılötesi ışık',pos_now:'Yatay {0} / {1}, dikey {2} / {3}',p_save:'Buraya kaydet',p_pick:'Bu konumu kaydetmek için bir numara seçin',p_empty:'Boş',p_saved:'{0}. konum kaydedildi',p_going:'{0}. konuma gidiliyor…',p_there:'{0}. konumda',ERR_empty:'orada kayıt yok',ERR_ptz:'kamera yanıt vermedi',
  sharp_title:'Keskinlik (gündüz)',sharp125:'125 · yumuşak',sharp140:'140 · varsayılan',sharp170:'170 · keskin',sharp:'Keskinlik',sharp_note:'SD karta kaydedilir ve yeniden başlatmada kalır. Gündüzse hemen uygulanır.',
  status:'Durum',links:'Bağlantılar',gallery:'Kayıtlar (8090)',rtsp_title:'RTSP (VLC vb.)',copy:'Kopyala',copied:'RTSP adresi kopyalandı',
  maint:'Bakım',reboot:'Yeniden başlat',logs_show:'Günlükleri göster',logs_hide:'Günlükleri gizle',loading:'Okunuyor…',next_title:'Sonraki açılışta',use_patched:'Yamalı sürüm',use_stock:'Stok yazılım',
@@ -494,7 +529,7 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',g_hide:'Izgarayı gizle',g_show:'Izgarayı göster',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet',md_note:'Hassasiyet ve takip hemen uygulanır, bölgeler yeniden başlatınca. Bölge dışındaki hareket kaydedilmez. Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.',c_md:'Kaydedildi. Bu değişiklik için yeniden başlatma gerekiyor. Şimdi yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_applied:'Kaydedildi ve uygulandı.',md_later:'Kaydedildi. Bir sonraki yeniden başlatmada uygulanır.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
  k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
  v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
- m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
+ m_auto:'Otomatik ({0})',m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
  v_sd:'{0} dolu / {1} (%{2})',v_cpu:'%{0} kullanımda',v_persistent:'Kalıcı (/bak)',d:'gün',h:'sa',min:'dk'}};
 var lang='en';
 try{var q=new URLSearchParams(location.search).get('lang');if(q==='tr'||q==='en'){localStorage.setItem('hc_lang',q)}lang=localStorage.getItem('hc_lang')||'en'}catch(e){}
@@ -538,6 +573,36 @@ function command(b){
 }
 document.addEventListener('click',function(e){var b=e.target.closest('button[data-c]');if(b)command(b)});
 
+// One button per light: it sends the opposite of what the camera reports.
+var lit={wl:false,ir:false};
+document.querySelectorAll('button[data-toggle]').forEach(function(b){b.onclick=function(){
+  var k=b.dataset.toggle,name=t(k);
+  msg(t('sending',name));
+  send(k+(lit[k]?'_off':'_on')).then(function(r){var x=reply(r);msg(name+': '+x[0],x[1]);status()},function(){msg(t('neterr',name),'bad')});
+}});
+
+// Saved positions. "Save here" arms the next number press.
+var saving=false,lastV={};
+function presetUi(v){
+  lastV=v;
+  if(v.ptz){var a=v.ptz.split(' ');$('#ptzat').textContent=t('pos_now',a[0],a[2],a[1],a[3])}
+  document.querySelectorAll('button[data-preset]').forEach(function(b){
+    var p=v['preset'+b.dataset.preset];
+    b.disabled=!saving&&!p;b.title=p?p.replace(',',', '):t('p_empty');
+    b.classList.toggle('on',!saving&&!!p&&!!v.ptz&&v.ptz.indexOf(p.replace(',',' ')+' ')===0);
+  });
+}
+$('#psave').onclick=function(){saving=!saving;this.classList.toggle('on',saving);msg(saving?t('p_pick'):'');presetUi(lastV)};
+document.querySelectorAll('button[data-preset]').forEach(function(b){b.onclick=function(){
+  var n=b.dataset.preset,was=saving;
+  saving=false;$('#psave').classList.remove('on');
+  if(!was)msg(t('p_going',n));
+  send((was?'ptz_save':'ptz_go')+'&v='+n).then(function(r){
+    if(r==='OK')msg(t(was?'p_saved':'p_there',n),'good');else{var x=reply(r);msg(x[0],x[1])}
+    status();
+  },function(){msg(t('neterr',n),'bad')});
+}});
+
 // PTZ hold: commands are chained so "stop" can never overtake "move".
 var chain=Promise.resolve(),held=null;
 function ptz(c){chain=chain.then(function(){return send(c)}).catch(function(){})}
@@ -563,6 +628,7 @@ $('#ptoggle').onclick=function(){open=!open;this.textContent=t(open?'pv_stop':'p
 
 // Status
 var last=null;
+function modeName(v){var m=t('m_'+(v.mode||'unknown'));return v.image==='0'?t('m_auto',m):m}
 var ORDER=['build','next','mode','sharpness','cloud','recorder','lastmotion','sd','wifi','mem','cpu','uptime','time','hack','bootlog'];
 function gb(kb){return (kb/1048576).toFixed(2).replace('.',lang==='tr'?',':'.')+' GB'}
 function render(v){
@@ -572,7 +638,7 @@ function render(v){
     switch(k){
     case 'build':if(v.build)add(k,t(v.build==='patched'?'v_patched':'v_stock'),v.build==='patched'?'good':'bad');break;
     case 'next':if(v.next)add(k,t({patched:'v_next_patched',stock_disabled:'v_next_disabled',stock_pending:'v_next_pending'}[v.next]||v.next));break;
-    case 'mode':if(v.mode)add(k,t('m_'+v.mode));break;
+    case 'mode':if(v.mode)add(k,modeName(v));break;
     case 'sharpness':if(v.sharpness)add(k,v.sharpness);break;
     case 'cloud':if('cloud_routes' in v){var ok=+v.cloud_routes>=2&&v.cloud_dns==='127.0.0.1';add(k,ok?t('v_blocked',v.cloud_routes):t('v_open',v.cloud_routes,v.cloud_dns||'?'),ok?'good':'bad')}break;
     case 'recorder':if('recorder' in v)add(k,t(v.recorder==='1'?'v_running':'v_stopped'),v.recorder==='1'?'good':'bad');break;
@@ -588,8 +654,11 @@ function render(v){
     }
   });
   document.querySelectorAll('button[data-k]').forEach(function(b){b.classList.toggle('on',b.dataset.k===v.sharpness)});
-  document.querySelectorAll('button[data-mode]').forEach(function(b){b.classList.toggle('on',b.dataset.mode===v.mode)});
-  $('#badge').textContent=(v.build==='patched'?t('v_next_patched'):(lang==='tr'?'Stok':'Stock'))+' · '+t('m_'+(v.mode||'unknown'))+' · '+(v.time||'');
+  ['wl','ir'].forEach(function(k){if(k in v){lit[k]=v[k]==='1';var b=$('#'+k);b.classList.toggle('on',lit[k]);b.setAttribute('aria-pressed',lit[k]?'true':'false')}});
+  presetUi(v);
+  var picked={'0':'auto','1':'day','2':'night'}[v.image]||v.mode;
+  document.querySelectorAll('button[data-mode]').forEach(function(b){b.classList.toggle('on',b.dataset.mode===picked)});
+  $('#badge').textContent=(v.build==='patched'?t('v_next_patched'):(lang==='tr'?'Stok':'Stock'))+' · '+modeName(v)+' · '+(v.time||'');
 }
 function status(){
   if(document.hidden)return;

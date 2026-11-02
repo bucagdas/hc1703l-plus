@@ -22,8 +22,9 @@ kalır: **kendi** kameranızdan aldığınız kopya üzerinden yamalanır, kulla
 
 Ayrıca:
 
-- **Kontrol paneli** (`:8080`): canlı önizleme, basılı tutunca dönen PTZ, beyaz ışık / IR,
-  gündüz / gece / otomatik, keskinlik hazır ayarları, durum (yamalı mı stok mu, bulut engeli, WiFi, SD,
+- **Kontrol paneli** (`:8080`): canlı önizleme, basılı tutunca dönen PTZ, dört kayıtlı kamera konumu, tek
+  düğmeyle beyaz ışık ve IR, gündüz / gece / otomatik (yalnız çalışan modu değil seçimi de gösterir), keskinlik
+  hazır ayarları, durum (yamalı mı stok mu, bulut engeli, WiFi, SD,
   RAM, CPU, son hareket), günlükler. Komutlar yalnız POST ile gider: sayfayı yenilemek ya da geri yüklenen
   sekme komutu tekrar çalıştırmaz. İngilizce ve Türkçe (başlıktaki EN/TR anahtarı; galeri
   panelin seçimini izler).
@@ -127,7 +128,8 @@ değiştirmek kamerayı stoğa düşürmez.
 - Bu projenin üzerine kurulduğu ve ihtiyaç duyduğu [temel hack ve söküm](https://github.com/Jalecom/AJ_HC1703L_Teardown) için
   [@Jalecom](https://github.com/Jalecom) ve orada adı geçen katkıcılar.
 - Tarayıcıda oynatma için GPAC'ın mp4box.js 0.5.2 kütüphanesi (BSD 3-Clause) pakete dahildir.
-- `sdcard/clean/bin/mdcfg`, `tools/mdcfg.c`'nin statik ARM derlemesidir (derleme komutu kaynakta).
+- `sdcard/clean/bin/mdcfg` ve `ptzpos`, `tools/mdcfg.c` ile `tools/ptzpos.c`'nin statik ARM derlemeleridir
+  (derleme komutu kaynakta).
 - Bu depoda yalnız HC1703L Plus kodu vardır, MIT lisanslıdır ([LICENSE](LICENSE)). Temel hack pakete
   dahil değildir; kendi deposundan alınır.
 - Augentix ya da Tange ile bağlantısı yoktur. Üreticiye ait ikili dağıtılmaz. Kullanım sorumluluğu

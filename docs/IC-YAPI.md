@@ -162,6 +162,14 @@ belirtilmeyen sayılar kamerada ölçüldü.
   günceller; takip sırasında kayıt kapalıdır (ioctl 0x89).
 - Takip sırasında yeniden başlatma, kamerayı bir sonraki hizalamaya kadar kayıtlı konumdan uzakta bırakır (statik).
 
+Kayıtlı konumlar SD karttaki `clean/ptz.conf` dosyasındadır. Dişlilerde yaklaşık 5 adım boşluk var; bu yüzden
+`tools/ptzpos.c` son 12 adımı hep aynı yönden atar. Dört yönden de 320 pikselde 1 piksel içinde aynı noktaya geldi.
+Yukarıdaki yeniden hizalamayla aynı konuma gelmek yaklaşık 4 dikey adım fark edebilir, çünkü o tarama diğer yönden
+gelir.
+
+Seçili görüntü modu devParam + 0xfa baytındadır (0 otomatik, 1 gündüz, 2 gece). Panel bunu `mdcfg image` ile okur;
+çalışan mod tek başına Otomatik seçimini gösteremez.
+
 ## Bulut uç noktaları
 
 `netguard.sh`, `/home/etc/resolv.conf` dosyasını (`/etc/resolv.conf` buraya bağlı, flash'ta) salt okunur bir RAM

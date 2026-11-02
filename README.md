@@ -22,8 +22,8 @@ patched from **your own** copy of the firmware, and everything you interact with
 
 Plus also adds:
 
-- **Control panel** on `:8080`: live preview, press-and-hold PTZ, white light / IR, day / night / auto,
-  sharpness presets, status (patched or stock, cloud block, Wi-Fi, SD, RAM, CPU, last motion), logs.
+- **Control panel** on `:8080`: live preview, press-and-hold PTZ, four saved camera positions, one-button
+  white light and IR, day / night / auto (showing what is selected, not only what runs), sharpness presets, status (patched or stock, cloud block, Wi-Fi, SD, RAM, CPU, last motion), logs.
   Commands are POST-only, so reloading the page or restoring a tab never re-runs a command. English and
   Turkish (EN/TR switch in the header; the gallery follows the panel's choice).
 - **Recordings gallery** on `:8090`: motion events as cards (snapshot + clip), per-day view, in-browser
@@ -124,7 +124,8 @@ in a row do not drop the camera to stock.
 - [@Jalecom](https://github.com/Jalecom) for the [base hack and teardown](https://github.com/Jalecom/AJ_HC1703L_Teardown), which this project
   builds on and requires, and the contributors listed there.
 - mp4box.js 0.5.2 by GPAC (BSD 3-Clause) is included for in-browser playback.
-- `sdcard/clean/bin/mdcfg` is a static ARM build of `tools/mdcfg.c` (build command in the source).
+- `sdcard/clean/bin/mdcfg` and `ptzpos` are static ARM builds of `tools/mdcfg.c` and `tools/ptzpos.c` (build
+  command in the source).
 - This repository contains only HC1703L Plus code, MIT licensed ([LICENSE](LICENSE)). The base hack is
   not included; get it from its own repository.
 - Not affiliated with Augentix or Tange. No vendor binaries are distributed. Use at your own risk.

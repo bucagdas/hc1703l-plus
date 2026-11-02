@@ -162,6 +162,14 @@ Numbers below were measured on the camera unless marked static.
   tracking is off; during tracking saving is off (ioctl 0x89).
 - A reboot during tracking leaves the camera away from the saved position until the next re-reference (static).
 
+Saved positions live in `clean/ptz.conf` on the SD card. The gears have about 5 steps of play, so `tools/ptzpos.c`
+always takes the last 12 steps from the same side; from all four directions it landed within 1 of 320 pixels. The
+same position reached by the re-reference above can differ by about 4 tilt steps, because that sweep arrives from
+the other side.
+
+The selected image mode is the byte at devParam + 0xfa (0 auto, 1 day, 2 night), and p2pcam keeps it in the file.
+The panel reads it with `mdcfg image`; the running mode alone cannot show Auto.
+
 ## Cloud endpoints
 
 `netguard.sh` covers `/home/etc/resolv.conf` (the target of `/etc/resolv.conf`, on flash) with a read-only RAM

@@ -11,5 +11,9 @@ T=/tmp/webui.sd
 cp $S $T.new || { rm -f $T.new; exit 1; }
 sh -n $T.new && grep -q 'HC1703L-WEBUI-SD' $T.new || { rm -f $T.new; exit 1; }
 chmod 755 $T.new
-grep -q " $W " /proc/mounts && umount $W
+# The panel may be running right now, which keeps the mount busy: detach it lazily. "$W" without the trailing
+# space also matches a stale entry, listed as "$W\\040(deleted)". Without this, mv and mount --bind both fail.
+if grep -q " $W" /proc/mounts; then
+  umount $W 2>/dev/null || umount -l $W || { rm -f $T.new; exit 1; }
+fi
 mv -f $T.new $T && mount --bind $T $W
