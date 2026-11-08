@@ -10,6 +10,9 @@
 #   POST webui?c=COMMAND            command; replies "OK [code args]" or "ERR code".
 #   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; sensitivity and tracking apply at once, zones at the next boot
 #   POST webui?c=nightly_on|nightly_off   nightly restart of the stock p2pcam: kept in clean/NOREBOOT, applied at once
+#   GET  webui?s=cam                camera settings: saved (clean/cam.conf) and running ("now_" prefix)
+#   POST webui?c=cam_save&v=n200.d3300.h1.p0.r1.v6.s1.c0.o1.t0   save clean/cam.conf; live where possible
+#   POST webui?c=day_retest          let auto mode re-check daylight now (/tmp/forceday)
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
 R=/tmp/mnt/mmc01/0
@@ -164,6 +167,60 @@ nightly_set(){
   fi
   if [ -n "$ok" ]; then echo "OK nightly_live"; else echo "OK nightly_saved"; fi
 }
+# Camera settings live in clean/cam.conf (keys in tools/mdcfg.c). debug_cmd.sh applies them to RAM copies at boot;
+# mdcfg live applies what p2pcam re-reads. Night picture, continuous recording, time stamp and turn need a boot.
+kv(){ awk -F= -v k="$1" '$1==k{v=$2} END{print v}' "$2" 2>/dev/null; }
+cam_read(){
+  pid=$(p2p_pid)
+  [ -n "$pid" ] && tool && /tmp/mdcfg state "$pid" 2>/dev/null | sed 's/^/now_/'
+  ls /tmp/VOICE/*.wav >/dev/null 2>&1 && echo "now_voice=1" || echo "now_voice=0"
+  [ -f $C/cam.conf ] && cat $C/cam.conf
+}
+cam_save(){
+  case "$v" in ''|*[!a-z0-9.-]*) echo "ERR invalid"; return 1 ;; esac
+  [ -d $C ] && tool || { echo "ERR no_sd"; return 1; }
+  n=/tmp/cam.conf.$$
+  rm -f $n
+  for p in $(echo "$v" | tr . ' '); do
+    case "$p" in
+      n100|n200|n400) echo "night=${p#n}" ;;
+      d2000|d3300|d5000) echo "day=${p#d}" ;;
+      h[01]) echo "hourly=${p#h}" ;;
+      p0|p10|p40|p70) echo "person=${p#p}" ;;
+      r[012]) echo "recmode=${p#r}" ;;
+      v[1-9]|v10) echo "volume=${p#v}" ;;
+      s[01]) echo "voice=${p#s}" ;;
+      c[012]) echo "nightcolor=${p#c}" ;;
+      o-1|o[0-3]) echo "osd=${p#o}" ;;
+      t[01]) echo "rotate=${p#t}" ;;
+      *) echo "bad" ;;
+    esac
+  done > $n
+  if grep -q '^bad$' $n || ! /tmp/mdcfg apply /home/devParam.dat $n.out $n; then rm -f $n $n.out; echo "ERR invalid"; return 1; fi
+  rm -f $n.out
+  if cp $n $C/cam.new && sync && mv -f $C/cam.new $C/cam.conf && sync; then rm -f $n; else rm -f $n $C/cam.new; echo "ERR sd_write"; return 1; fi
+  # Live part, patched build only (mdcfg checks the addresses as well).
+  ok=0
+  pid=$(p2p_pid)
+  if [ -f /tmp/p2pcam.clean.sqfs ] && [ -n "$pid" ] && [ "$(md /proc/$pid/exe)" = "$(cat $C/p2pcam.md5 2>/dev/null)" ]; then
+    cat $C/md.conf $C/cam.conf > /tmp/plus.live 2>/dev/null
+    /tmp/mdcfg live "$pid" /tmp/plus.live >/dev/null 2>&1 && ok=1
+    if [ "$(kv voice $C/cam.conf)" = 0 ]; then
+      rm -f /tmp/VOICE/*.wav
+    elif ! ls /tmp/VOICE/*.wav >/dev/null 2>&1; then
+      grep -q ' /bak/VOICE.tgz ' /proc/mounts && umount /bak/VOICE.tgz
+      tar -xf /bak/VOICE.tgz -C /tmp >/dev/null 2>&1 || ok=0
+    fi
+    # Anything p2pcam does not take live (or did not take) needs a boot.
+    /tmp/mdcfg state "$pid" > /tmp/cam.now 2>/dev/null || ok=0
+    for k in night day recmode volume nightcolor rotate osd; do
+      w=$(kv $k $C/cam.conf)
+      [ -z "$w" ] || [ "$w" = "$(kv $k /tmp/cam.now)" ] || ok=0
+    done
+    [ "$(kv hourly_switch /tmp/cam.now)" != 1 ] || [ "$(kv hourly $C/cam.conf)" = "$(kv hourly /tmp/cam.now)" ] || ok=0
+  fi
+  if [ $ok = 1 ]; then echo "OK cam_live"; else ready_for_reboot; echo "OK cam_saved"; fi
+}
 md_read(){
   sens=1; if [ -f $C/md.conf ]; then cat $C/md.conf; else tool && /tmp/mdcfg show /home/devParam.dat; echo "sensitivity=1"; fi
 }
@@ -190,6 +247,13 @@ md_save(){
 }
 
 command(){
+  # Picture turned 180 degrees at boot (cam.conf rotate=1): swap the motor directions so the arrows match the view.
+  if grep -q '^rotate=1' /tmp/plus.conf 2>/dev/null; then
+    case "$c" in
+      ptzl) c=ptzr ;; ptzr) c=ptzl ;; ptzu) c=ptzd ;; ptzd) c=ptzu ;;
+      ptzlu) c=ptzrd ;; ptzrd) c=ptzlu ;; ptzld) c=ptzru ;; ptzru) c=ptzld ;;
+    esac
+  fi
   case "$c" in
     day)   h 'ircut?mode=day' ;;
     night) h 'ircut?mode=night' ;;
@@ -228,6 +292,8 @@ command(){
     md_save)      md_save; return ;;
     ptz_save)     ptz_save; return ;;
     ptz_go)       ptz_go; return ;;
+    cam_save)     cam_save; return ;;
+    day_retest)   touch /tmp/forceday; sleep 2; rm -f /tmp/forceday; echo "OK day_retest"; return ;;
     nightly_on)   nightly_set 1; return ;;
     nightly_off)  nightly_set 0; return ;;
     reboot) ready_for_reboot
@@ -281,6 +347,7 @@ status(){
 case "$s" in
   status) text; status; exit 0 ;;
   md) text; md_read; exit 0 ;;
+  cam) text; cam_read; exit 0 ;;
   snap)
     f=/tmp/wsnap.$$.jpg
     httpclt getfile "http://127.0.0.1:8001/snapshot" $f >/dev/null 2>&1
@@ -359,6 +426,9 @@ button.danger:active{color:#fff;background:var(--bad);border-color:var(--bad)}
 .presets .row{justify-content:center}
 .ptz span{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
 .note{font-size:12px;color:var(--muted);margin:6px 0 0}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 20px}
+.cgrid h3{margin-top:10px}
+button:disabled{opacity:.45;cursor:default}
 dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0;font-size:14px}
 dt{color:var(--muted)}
 dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
@@ -493,6 +563,56 @@ footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
       <p class="note" id="nightly_wait" data-i18n="nightly_wait" hidden></p>
       <pre id="logs" hidden></pre>
     </section>
+    <section class="card wide" id="camcard">
+      <h2 data-i18n="cam_title">Camera settings</h2>
+      <div class="cgrid">
+        <div><h3 data-i18n="cam_nightview">Night picture</h3><div class="row">
+          <button type="button" data-cam="c" data-v="0" data-i18n="nc0">Infrared (black and white)</button>
+          <button type="button" data-cam="c" data-v="1" data-i18n="nc1">Colour, brighter on motion</button>
+          <button type="button" data-cam="c" data-v="2" data-i18n="nc2">Colour</button></div></div>
+        <div><h3 data-i18n="cam_night">Switch to night</h3><div class="row">
+          <button type="button" data-cam="n" data-v="400" data-i18n="earlier">Earlier</button>
+          <button type="button" data-cam="n" data-v="200" data-i18n="dflt">Default</button>
+          <button type="button" data-cam="n" data-v="100" data-i18n="later">Later</button></div></div>
+        <div><h3 data-i18n="cam_day">Back to day</h3><div class="row">
+          <button type="button" data-cam="d" data-v="2000" data-i18n="earlier">Earlier</button>
+          <button type="button" data-cam="d" data-v="3300" data-i18n="dflt">Default</button>
+          <button type="button" data-cam="d" data-v="5000" data-i18n="later">Later</button></div></div>
+        <div><h3 data-i18n="cam_hourly">Hourly day check (04:00–17:00)</h3><div class="row">
+          <button type="button" data-cam="h" data-v="1" data-i18n="on">On</button>
+          <button type="button" data-cam="h" data-v="0" data-i18n="off">Off</button>
+          <button type="button" id="retest" data-i18n="retest">Check now</button></div></div>
+        <div><h3 data-i18n="cam_person">Person detection</h3><div class="row">
+          <button type="button" data-cam="p" data-v="0" data-i18n="p0">Same as motion</button>
+          <button type="button" data-cam="p" data-v="70" data-i18n="p70">Strict</button>
+          <button type="button" data-cam="p" data-v="40" data-i18n="p40">Medium</button>
+          <button type="button" data-cam="p" data-v="10" data-i18n="p10">Loose</button></div></div>
+        <div><h3 data-i18n="cam_rec">SD recording</h3><div class="row">
+          <button type="button" data-cam="r" data-v="1" data-i18n="r1">Motion events</button>
+          <button type="button" data-cam="r" data-v="2" data-i18n="r2">Continuous</button>
+          <button type="button" data-cam="r" data-v="0" data-i18n="off">Off</button></div></div>
+        <div><h3 data-i18n="cam_vol">Speaker volume</h3><div class="row">
+          <button type="button" data-cam="v" data-v="2" data-i18n="s_low">Low</button>
+          <button type="button" data-cam="v" data-v="6" data-i18n="s_mid">Medium</button>
+          <button type="button" data-cam="v" data-v="10" data-i18n="s_high">High</button></div></div>
+        <div><h3 data-i18n="cam_voice">Voice prompts</h3><div class="row">
+          <button type="button" data-cam="s" data-v="1" data-i18n="on">On</button>
+          <button type="button" data-cam="s" data-v="0" data-i18n="off">Off</button></div></div>
+        <div><h3 data-i18n="cam_osd">Time stamp</h3><div class="row">
+          <button type="button" data-cam="o" data-v="-1" data-i18n="off">Off</button>
+          <button type="button" data-cam="o" data-v="0" data-i18n="o0">Top left</button>
+          <button type="button" data-cam="o" data-v="1" data-i18n="o1">Top right</button>
+          <button type="button" data-cam="o" data-v="2" data-i18n="o2">Bottom left</button>
+          <button type="button" data-cam="o" data-v="3" data-i18n="o3">Bottom right</button></div></div>
+        <div><h3 data-i18n="cam_rotate">Picture</h3><div class="row">
+          <button type="button" data-cam="t" data-v="0" data-i18n="t0">Normal</button>
+          <button type="button" data-cam="t" data-v="1" data-i18n="t1">Upside down (180°)</button></div></div>
+      </div>
+      <div class="row" style="margin-top:14px"><button type="button" id="camsave" data-i18n="md_save">Save</button></div>
+      <p class="note" data-i18n="cam_note">Thresholds, the hourly check, person detection, recording on or off, volume and voice prompts apply at once. Night picture, continuous recording, time stamp and picture turn need a reboot.</p>
+      <p class="note" data-i18n="cam_note2">Earlier and Later move the light level at which the camera switches. Returning to day too early can make it switch back and forth: after 7 switches in 5 minutes it stays in night mode for 30 minutes. Without the hourly check a dim room may stay in night mode all day; with it, the picture blinks once an hour while it is dark. Continuous recording fills the SD card quickly and deletes the oldest days first. With the picture turned, the panel arrows are swapped to match.</p>
+      <p class="note" id="hourly_na" data-i18n="hourly_na" hidden>The hourly switch needs patched build v11.</p>
+    </section>
     <section class="card wide">
       <details>
         <summary data-i18n="advanced">Advanced: original test commands</summary>
@@ -545,7 +665,14 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  v_sd:'{0} used of {1} ({2}%)',v_cpu:'{0}% in use',v_persistent:'Persistent (/bak)',d:'d',h:'h',min:'min',
  nightly_title:'Nightly restart',nightly_note:'The stock firmware restarts the camera once a night, at a random time between 02:00 and 04:00. It does so only after about 22 hours of uptime and when nothing is being recorded. The restart takes about a minute and clears problems that build up when the camera runs for days. When it is off, the camera runs until you restart it. A stock boot always keeps it on, so the patched build comes back by itself.',
  nightly_wait:'Off is saved. This boot runs the stock firmware, so the restart stays on until the next patched boot.',nightly_live:'saved and applied',nightly_saved:'saved, applies on the next patched boot',
- k_nightly:'Nightly restart',v_nightly_on:'On, next around {0}',v_nightly_off:'Off'},
+ k_nightly:'Nightly restart',v_nightly_on:'On, next around {0}',v_nightly_off:'Off',
+ cam_title:'Camera settings',cam_nightview:'Night picture',nc0:'Infrared (black and white)',nc1:'Colour, brighter on motion',nc2:'Colour',
+ cam_night:'Switch to night',cam_day:'Back to day',earlier:'Earlier',dflt:'Default',later:'Later',cam_hourly:'Hourly day check (04:00–17:00)',retest:'Check now',
+ cam_person:'Person detection',p0:'Same as motion',p70:'Strict',p40:'Medium',p10:'Loose',cam_rec:'SD recording',r1:'Motion events',r2:'Continuous',
+ cam_vol:'Speaker volume',cam_voice:'Voice prompts',cam_osd:'Time stamp',o0:'Top left',o1:'Top right',o2:'Bottom left',o3:'Bottom right',cam_rotate:'Picture',t0:'Normal',t1:'Upside down (180°)',
+ cam_note:'Thresholds, the hourly check, person detection, recording on or off, volume and voice prompts apply at once. Night picture, continuous recording, time stamp and picture turn need a reboot.',
+ cam_note2:'Earlier and Later move the light level at which the camera switches. Returning to day too early can make it switch back and forth: after 7 switches in 5 minutes it stays in night mode for 30 minutes. Without the hourly check a dim room may stay in night mode all day; with it, the picture blinks once an hour while it is dark. Continuous recording fills the SD card quickly and deletes the oldest days first. With the picture turned, the panel arrows are swapped to match.',
+ hourly_na:'The hourly switch needs patched build v11.',c_cam:'Saved. Some of these settings need a reboot. Reboot now? No video and no recording for about a minute.',day_retest:'day check started, the picture may change for a moment',cam_name:'Camera settings'},
 tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera önizlemesi',connecting:'Bağlanıyor…',pv_stop:'Önizlemeyi durdur',pv_start:'Önizlemeyi başlat',
  pv_note:'Saniyede yaklaşık 1 kare, 640×360. Tam kalite için RTSP adresini kullanın.',pv_live:'Canlı',pv_fail:'Görüntü alınamadı, yeniden deneniyor…',pv_stopped:'Durduruldu',
  ptz_label:'Kamera yönü',t_step:'Kısa bir adım',t_hold:'Basılı tutun',ptz_note:'Oklar basılı tutulduğu sürece döner; köşeler kısa bir adım atar.',
@@ -568,7 +695,14 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  v_sd:'{0} dolu / {1} (%{2})',v_cpu:'%{0} kullanımda',v_persistent:'Kalıcı (/bak)',d:'gün',h:'sa',min:'dk',
  nightly_title:'Gece yeniden başlatma',nightly_note:'Stok yazılım kamerayı her gece bir kez, 02:00 ile 04:00 arasında rastgele bir saatte yeniden başlatır. Bunu yalnız kamera yaklaşık 22 saattir açıksa ve o sırada kayıt yapılmıyorsa yapar. Yeniden başlatma yaklaşık bir dakika sürer ve kamera günlerce açık kaldığında biriken sorunları temizler. Kapalıyken kamera siz yeniden başlatana kadar çalışır. Stok açılışta bu ayar hep açık kalır, böylece yamalı sürüm kendiliğinden geri gelir.',
  nightly_wait:'Kapalı ayarı kaydedildi. Bu açılış stok yazılımla yapıldığı için yeniden başlatma, sonraki yamalı açılışa kadar açık kalır.',nightly_live:'kaydedildi ve uygulandı',nightly_saved:'kaydedildi, sonraki yamalı açılışta uygulanır',
- k_nightly:'Gece yeniden başlatma',v_nightly_on:'Açık, sıradaki yaklaşık {0}',v_nightly_off:'Kapalı'}};
+ k_nightly:'Gece yeniden başlatma',v_nightly_on:'Açık, sıradaki yaklaşık {0}',v_nightly_off:'Kapalı',
+ cam_title:'Kamera ayarları',cam_nightview:'Gece görüntüsü',nc0:'Kızılötesi (siyah-beyaz)',nc1:'Renkli, harekette daha parlak',nc2:'Renkli',
+ cam_night:'Geceye geçiş',cam_day:'Gündüze dönüş',earlier:'Daha erken',dflt:'Varsayılan',later:'Daha geç',cam_hourly:'Saat başı gündüz denemesi (04:00–17:00)',retest:'Şimdi dene',
+ cam_person:'Kişi algılama',p0:'Hareketle aynı',p70:'Sıkı',p40:'Orta',p10:'Gevşek',cam_rec:'SD kayıt',r1:'Hareket olayları',r2:'Sürekli',
+ cam_vol:'Hoparlör sesi',cam_voice:'Sesli uyarılar',cam_osd:'Saat damgası',o0:'Sol üst',o1:'Sağ üst',o2:'Sol alt',o3:'Sağ alt',cam_rotate:'Görüntü',t0:'Normal',t1:'Ters (180°)',
+ cam_note:'Eşikler, saat başı deneme, kişi algılama, kaydın açılıp kapanması, ses düzeyi ve sesli uyarılar hemen uygulanır. Gece görüntüsü, sürekli kayıt, saat damgası ve görüntünün çevrilmesi yeniden başlatma ister.',
+ cam_note2:'Daha erken ve Daha geç, kameranın geçiş yaptığı ışık düzeyini değiştirir. Gündüze çok erken dönmek kameranın gidip gelmesine yol açabilir: 5 dakikada 7 geçişten sonra 30 dakika gece modunda kalır. Saat başı deneme kapalıyken loş bir oda gün boyu gece modunda kalabilir; açıkken hava karanlıksa görüntü saatte bir kez kısa süre değişir. Sürekli kayıt SD kartı hızla doldurur ve önce en eski günleri siler. Görüntü çevrilince paneldeki oklar da buna göre yer değiştirir.',
+ hourly_na:'Saat başı anahtarı yamalı v11 sürümünü ister.',c_cam:'Kaydedildi. Bu ayarların bir kısmı yeniden başlatma ister. Şimdi yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',day_retest:'gündüz denemesi başladı, görüntü bir an değişebilir',cam_name:'Kamera ayarları'}};
 var lang='en';
 try{var q=new URLSearchParams(location.search).get('lang');if(q==='tr'||q==='en'){localStorage.setItem('hc_lang',q)}lang=localStorage.getItem('hc_lang')||'en'}catch(e){}
 if(!L[lang])lang='en';
@@ -783,6 +917,32 @@ function loadMd(){
     drawMd();
   }).catch(function(){});
 }
+// Camera settings. Each button group edits one key; a key without a saved value shows what p2pcam runs with now.
+var CK={c:'nightcolor',n:'night',d:'day',h:'hourly',p:'person',r:'recmode',v:'volume',s:'voice',o:'osd',t:'rotate'},cam={};
+function drawCam(){document.querySelectorAll('button[data-cam]').forEach(function(b){b.classList.toggle('on',cam[b.dataset.cam]===b.dataset.v)})}
+function loadCam(){
+  fetch('webui?s=cam',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
+    var saved={},now={};
+    x.split('\n').forEach(function(l){var i=l.indexOf('=');if(i<1)return;var k=l.slice(0,i),v=l.slice(i+1);if(k.indexOf('now_')===0)now[k.slice(4)]=v;else saved[k]=v});
+    Object.keys(CK).forEach(function(s){var k=CK[s];cam[s]=k in saved?saved[k]:(k==='person'?'0':now[k])});
+    var na=now.hourly_switch!=='1';
+    document.querySelectorAll('button[data-cam="h"],#retest').forEach(function(b){b.disabled=na});
+    $('#hourly_na').hidden=!na;
+    drawCam();
+  }).catch(function(){});
+}
+document.querySelectorAll('button[data-cam]').forEach(function(b){b.onclick=function(){cam[b.dataset.cam]=b.dataset.v;drawCam()}});
+$('#retest').onclick=function(){var name=t('retest');msg(t('sending',name));send('day_retest').then(function(r){var x=reply(r);msg(x[0],x[1])},function(){msg(t('neterr',name),'bad')})};
+$('#camsave').onclick=function(){
+  var v=Object.keys(CK).filter(function(s){return cam[s]!==undefined&&cam[s]!==''}).map(function(s){return s+cam[s]}).join('.');
+  msg(t('md_saving'));
+  send('cam_save&v='+v).then(function(x){
+    if(x.indexOf('OK')!==0){var y=reply(x);msg(y[0],y[1]);return}
+    if(x==='OK cam_live'){msg(t('md_applied'),'good');loadCam();return}
+    if(!confirm(t('c_cam'))){msg(t('md_later'));return}
+    return send('reboot').then(function(){msg(t('md_rebooting'),'good')});
+  }).catch(function(){msg(t('neterr',t('cam_name')),'bad')});
+};
 $('#logbtn').onclick=function(){
   var p=$('#logs');
   if(!p.hidden){p.hidden=true;this.textContent=t('logs_show');return}
@@ -790,7 +950,7 @@ $('#logbtn').onclick=function(){
   fetch('webui?s=logs',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){p.textContent=x});
 };
 document.addEventListener('visibilitychange',function(){if(!document.hidden){status();next()}});
-applyLang();status();loadMd();setInterval(status,5000);next();
+applyLang();status();loadMd();loadCam();setInterval(status,5000);next();
 })();
 </script>
 </body>

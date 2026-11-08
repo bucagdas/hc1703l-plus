@@ -33,6 +33,10 @@ Plus also adds:
 - **Motion settings** in the panel: sensitivity, tracking and up to 25 alarm zones drawn on the live
   preview. Sensitivity and tracking apply at once; zones after a reboot. Everything stays in RAM, so settings do
   not touch flash either.
+- **Camera settings** in the panel: night picture (infrared or colour), when to switch to night and back to day,
+  the hourly day check, person detection threshold, SD recording (motion events, continuous or off), speaker
+  volume, voice prompts, time stamp corner and a 180° turn. Kept in `clean/cam.conf`; what `p2pcam` re-reads
+  applies at once, the rest after a reboot. Nothing goes to flash.
 - **Motion snapshots** (`mo.sh`): one snapshot per motion clip, linked to it.
 - **Fixes:** RTSP socket buffer on the wrong socket, recordings skipping seconds in dim light, vendor
   port 554 accepting non-RTSP commands from the LAN.
@@ -48,10 +52,11 @@ power on
      │    ├─ netguard.sh    cloud block (RAM copy)
      │    ├─ boot.sh        waits for the SD card, then runs health.sh
      │    ├─ binds RAM copies of clean/p2pcam.sqfs and clean/sensor.sh over /bak   (flash untouched)
-     │    └─ applies clean/md.conf to RAM copies of devParam.dat and hwcfg.ini     (flash untouched)
+     │    ├─ applies clean/md.conf + cam.conf to RAM copies of devParam.dat and hwcfg.ini   (flash untouched)
+     │    └─ keeps devParam/extraParam/osdParam and their _bak copies in RAM, so vendor saves stay off flash
      ├─ sensor.sh → minihack.sh (base hack: Wi-Fi, telnet, FTP, httpd)
      └─ p2pcam (patched)
-health.sh  T+0 plus.sh (panel, gallery, motion service)
+health.sh  T+0 plus.sh (panel, gallery, motion service, clock re-sync every 6 h, stops the factory test loop)
            T+5 min  healthy → put the loader back; 3 failed boots in a row → stays stock
            T+30 min still healthy → clear the failure counters
 ```
@@ -75,7 +80,7 @@ in a row do not drop the camera to stock.
    Check that telnet, FTP and `http://<camera>:8080` work.
 2. Copy `/bak/p2pcam.sqfs` from the camera to your computer (FTP).
 3. Build: `patcher/build.sh p2pcam.sqfs out/`. The patched `p2pcam` md5 must be
-   `018f4c40708d3a2b3ba0a26343ab0f14`.
+   `718a2a38ad4a52c5618157c0995b2fd1`.
 4. Copy to the SD card root: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    Put `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` and `out/p2pcam.md5` into `clean/`.
    **Do not copy `debug_cmd.sh` yet.**
@@ -92,6 +97,9 @@ between 02:00 and 04:00 (camera clock), and only after about 22 hours of uptime 
 It is on by default. **Off** in the panel's Maintenance card writes `clean/NOREBOOT`; the setting is applied at
 once and again on every patched boot. A stock boot always keeps the restart on, so a camera that fell back to stock
 gets the patched build back the next night. Nothing is written to flash.
+
+The base hack sets the clock once at boot. So that the clock does not drift with the restart off, `clock.sh`
+re-syncs it every 6 hours from the default gateway (the router), the only time server the cloud block leaves.
 
 ## Recovery
 

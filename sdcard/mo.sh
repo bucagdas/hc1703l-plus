@@ -20,7 +20,8 @@ trap '' HUP
 trap 'rm -f "$PIDF"; echo "stopped"; exit 0' TERM INT
 mkdir -p "$OUT"
 
-newest() { ls -1 $BASE/20[0-9][0-9]-*/*/*.mp4 2>/dev/null | tail -1; }
+# Event clips only: with continuous recording on, the camera also writes plain "*.mp4" segments every minute.
+newest() { ls -1 $BASE/20[0-9][0-9]-*/*/*M.mp4 2>/dev/null | tail -1; }
 # :8090/ redirects to the CGI gallery.
 gen_index() {
   echo '<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/cgi-bin/gal"><title>HC1703L</title></head><body><a href="/cgi-bin/gal">Recordings</a></body></html>' > "$OUT/index.html"

@@ -75,6 +75,14 @@ nightly(){
   fi
 }
 
+# p2pcam sets the person score threshold once at start-up from motion_level; put the saved settings back over it
+# (debug_cmd.sh left the merged md.conf + cam.conf in /tmp/plus.conf). Patched boots only.
+settings(){
+  [ -s /tmp/plus.conf ] && [ -x /tmp/mdcfg ] || return 0
+  pid=$(ps | awk '/\/p2pcam\/p2pcam/ && !/awk/{print $1; exit}')
+  [ -n "$pid" ] && /tmp/mdcfg live "$pid" /tmp/plus.conf >/dev/null 2>&1 || log "WARNING: settings not applied"
+}
+
 denetle(){
   set -- $(md5sum /p2pcam/p2pcam 2>/dev/null)
   got=$1
@@ -115,6 +123,7 @@ if [ "$got" = "$want" ]; then
     arm && log "patched healthy, loader armed"
   fi
   nightly
+  settings
   sleep $((STABLE-ARM))
   denetle
   if [ "$got" = "$want" ] && [ $ok = 1 ]; then

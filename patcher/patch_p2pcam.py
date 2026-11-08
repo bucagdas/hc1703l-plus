@@ -73,5 +73,16 @@ for a,o,n in [(351928, 'fff7daf8', 'bdf0a2fe'), (352388, 'fef7f4ff', 'bdf0bcfd')
 code(0x5ef24,bytes.fromhex('b7f79ce8'),bytes.fromhex('aff30080'),'get_venc_stream memset -> nop.w')
 # 15) Vertical tracking: support_ymv defaults to 1, which drops dy. Nothing on this camera sets it (no defalut.config).
 code(0x19bae,bytes.fromhex('0121'),bytes.fromhex('0021'),'support_ymv default 1->0')
+# 16) /home/reboot.time is rewritten every 10 min on a cloud-registered camera (flash). Keep the timer, drop the write.
+#     The write on reboot (FUN_00041e30) and start.sh's write after p2pcam exits stay, so a warm reboot keeps the time.
+code(0x30be6,bytes.fromhex('adf178fe'),bytes.fromhex('aff30080'),'reboot.time 10 min timer write -> nop.w')
+code(0x30fe0,bytes.fromhex('adf17bfc'),bytes.fromhex('aff30080'),'reboot.time first write -> nop.w')
+# 17) Switch for the hourly forced-day probe (asm/day_probe.S, in the dead Tange code after req_gate).
+#     Flag: hwcfg field 0x3a52c4 (key only_wireless_bind), filled by the loader and read by nothing else.
+code(0x113d00,bytes.fromhex('eddd26f7f7fb0120c3f05efc18f76afb002800f0'),
+     bytes.fromhex('fb68043b45f2c422c0f23a02126802b17f237047'),'day_probe stub')
+code(0x37156,bytes.fromhex('fb68043b'),bytes.fromhex('dcf0d3fd'),'isImageNeedForceToDay hour check -> bl day_probe')
+# 18) Sub stream (640x360) VBR cap 384 -> 768 kbps
+code(0x5fe6e,bytes.fromhex('4ff4c073'),bytes.fromhex('4ff44073'),'sub stream max_bit_rate 0x180->0x300')
 open(dst,'wb').write(b)
 print('sha256',hashlib.sha256(b).hexdigest())

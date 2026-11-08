@@ -45,8 +45,11 @@ Plus, 1. adımda `/bak/p2pcam.sqfs` ve `/bak/sensor.sh` üzerine RAM kopyaları 
 | 13 | `0x113c00` + 2 çağrı | `req_gate`: 554, CTP/HTTP ile aynı dağıtıcıyı paylaşır; RTSP dışı istek yalnız loopback'ten kabul edilir |
 | 14 | `0x5ef24` | `get_venc_stream` içindeki kare başına 300 KiB `memset` kaldırıldı (CPU) |
 | 15 | `0x19bae` | `support_ymv` varsayılanı 1 → 0: dikey takip |
+| 16 | `0x30be6`, `0x30fe0` | buluta kayıtlı kamerada `/home/reboot.time` flash'a 10 dakikada bir yazılıyordu; zamanlayıcı kaldı, yazma kalktı. Yeniden başlatırken yapılan yazma duruyor, böylece sıcak yeniden başlatmada saat korunur |
+| 17 | `0x37156` + `0x113d00` | `day_probe`: saat başı zorunlu gündüz denemesi (04:00–16:59) için anahtar. Bayrak: hwcfg alanı `0x3a52c4` (anahtar `only_wireless_bind`, üretici kullanmıyor) |
+| 18 | `0x5fe6e` | alt akış (640×360) VBR tavanı 384 → 768 kbps |
 
-`bind_lo` ve `req_gate`, 9. yamadan sonra ölü kod olan Tange komut işleyicisi alanında durur. Yerel
+`bind_lo`, `req_gate` ve `day_probe`, 9. yamadan sonra ölü kod olan Tange komut işleyicisi alanında durur. Yerel
 üretici API'si (`http://127.0.0.1:8001/...`; `httpclt`, panel ve `mo.sh` kullanır) çalışmaya devam eder.
 
 ## Bit hızı denetimi (`patcher/patch_rc.py`, C2 seti)
@@ -97,7 +100,7 @@ dosyayı `*_bak`'a kopyalar. `devParam.dat` WiFi SSID'sini (+0x100) ve parolası
 | Ayar | Yer | Not |
 |---|---|---|
 | Alarm bölgeleri | `devParam.dat` 0x314 | i32 sayı (en çok 25) + 25 × {u8 x, y, w, h}, birim görüntünün onda biri (10×10 ızgara). Olay iş parçacığı başlarken bir kez okunur (`checkMdAreparams`, `0x16dc8`). Canlı doğrulandı |
-| Bölge desteği | `support_mdzone` | Bu kamerada çalışırken 1 (`0x3a4ca8`, süreç belleğinden okundu); oysa ne `hwcfg.ini` ne de bir `defalut.config` bunu ayarlıyor. Neyin ayarladığı bilinmiyor |
+| Bölge desteği | `support_mdzone` | Bu kamerada çalışırken 1 (`0x3a4ca8`, süreç belleğinden okundu); oysa ne `hwcfg.ini` ne de bir `defalut.config` bunu ayarlıyor: hwcfg yükleyicisindeki (`FUN_00019030`) derlenmiş bir blok onu 1 yapıyor |
 | Gerçek eşik | `hwcfg.ini` içinde `[config] motion_level`, 0/1/2 | açılışta bir kez `0x617bc` uygular: gereken hareketli blok 15 / 4 / 1 (`md_setting_low/middle/high` ile değişir). Yoksa 1. Canlı doğrulandı: `motion_level = 2` eşiği 1 yapar |
 | Uygulamaya gösterilen seviye | `devParam.dat` 0xe8 = 1/2/3 | yalnız üretici uygulamasına geri bildirilir |
 | Hareket takibi | `devParam.dat` 0x2d8 | açıkken kayıt bölge denetimini atlar; ayrıntı için aşağıda Takip |
@@ -193,6 +196,31 @@ saat çalışan süreçten okundu.
 açılış kaydında 3–8 Kasım arasında her gece bir yeniden başlatma var (02:07 ile 03:56 arası). 17:28'deki bir
 açılıştan sonraki gece, kamera yalnız 10 saattir açık olduğu için atlandı. Kapatmanın etkisi bellekte doğrulandı,
 henüz bütün bir gece boyunca denenmedi.
+
+## Kamera ayarları (`clean/cam.conf`)
+
+`debug_cmd.sh`, `md.conf` ve `cam.conf`'u `/tmp/plus.conf` içinde birleştirir. `p2pcam` başlamadan önce
+`mdcfg apply` devParam alanlarını RAM kopyasına yazar; hwcfg anahtarları da `hwcfg.ini`'nin RAM kopyasının sonuna
+eklenir. Bir anahtarın son satırı geçerlidir. `[config]` tablosu, `support_mdzone`'u, gündüz/gece eşiklerini ve ses
+düzeylerini zorlayan derlenmiş bir bloktan sonra okunur. Açılıştan sonra `health.sh` `mdcfg live`'ı bir kez daha
+çalıştırır, çünkü `p2pcam` kişi eşiğini açılışta `motion_level`'dan türetir. Panel `mdcfg live` ve `mdcfg state`
+kullanır.
+
+| Anahtar | Yer | Canlı | Not |
+|---|---|---|---|
+| `night` / `day` | hwcfg `agcnight_value` (`0x3a4c54`, eksi olarak) / `agcday_value` (`0x3a4c5c`) | evet | `icrCtrlThd` 0,5 sn'de bir okur; art arda 3 örnekten sonra geçer. 5 dk'da 7'den fazla geçiş geceyi 30 dk kilitler |
+| `hourly` | hwcfg `only_wireless_bind` (`0x3a52c4`) + 17. yama | evet | `FUN_000370f8`: otomatik mod 04:00–16:59 arasında her saatin ilk 10 sn'sinde gündüze zorlar. `/tmp/forceday` yine denetim yaptırır (en çok dakikada bir) |
+| `person` | float `0x3a1418` | evet | stok, `motion_level` 0 / 1 / 2 için 0,7 / 0,4 / 0,1 kullanır |
+| `recmode` | devParam `0x2c4` | 0↔1 | 2 = sürekli + olay, açılışta kurulur. Sürekli kayıt parçaları `*.mp4`, olay klipleri `*M.mp4` adını alır |
+| `volume` | devParam `0x3bc` (×10) | evet | her çalmada okunur |
+| `voice` | `/bak/VOICE.tgz` üzerine boş bir RAM dosyası | evet | `start.sh`, `debug_cmd.sh`'den sonra onu `/tmp/VOICE` içine açar |
+| `nightcolor` | devParam `0x2cc` | açılış | 0 kızılötesi, 1 renkli ve harekette beyaz ışık güçlenir, 2 renkli |
+| `osd` | hwcfg `osdtime_pos` → `0x39ff78` | açılış | −1 kapalı, 0 sol üst, 1 sağ üst, 2 sol alt, 3 sağ alt (doğrulandı: 3) |
+| `rotate` | devParam `0xfc` = 3 | açılış | 180° (doğrulandı). `p2pcam` kendi PTZ hareketlerini düzeltir; panel oklarını yer değiştirir |
+
+Ayrıca her açılışta: `devParam.dat(_bak)`, `extraParam.dat(_bak)` ve `osdParam.dat(_bak)` RAM kopyalarıdır, çünkü
+üreticinin her kaydı `_bak` dosyasını da yeniden yazar. `plus.sh` stok fabrika test döngüsü `auto_test.sh`'i
+durdurur ve `clock.sh`'yi başlatır (6 saatte bir varsayılan ağ geçidinden NTP).
 
 ## Bulut uç noktaları
 

@@ -45,8 +45,11 @@ Plus binds RAM copies over `/bak/p2pcam.sqfs` and `/bak/sensor.sh` from step 1, 
 | 13 | `0x113c00` + 2 call sites | `req_gate`: port 554 shares a dispatcher with CTP/HTTP; non-RTSP requests are accepted only from loopback |
 | 14 | `0x5ef24` | per-frame 300 KiB `memset` in `get_venc_stream` removed (CPU) |
 | 15 | `0x19bae` | `support_ymv` default 1 → 0: vertical tracking |
+| 16 | `0x30be6`, `0x30fe0` | `/home/reboot.time` was rewritten on flash every 10 min on a cloud-registered camera; the timer stays, the write is gone. The write on reboot stays, so a warm reboot keeps the time |
+| 17 | `0x37156` + `0x113d00` | `day_probe`: switch for the hourly forced-day probe (04:00–16:59). Flag: hwcfg field `0x3a52c4` (key `only_wireless_bind`, unused by the vendor) |
+| 18 | `0x5fe6e` | sub stream (640×360) VBR cap 384 → 768 kbps |
 
-`bind_lo` and `req_gate` live in the Tange command-handler area, which is dead code once patch 9 is in.
+`bind_lo`, `req_gate` and `day_probe` live in the Tange command-handler area, which is dead code once patch 9 is in.
 The local vendor API (`http://127.0.0.1:8001/...`, used by `httpclt`, the panel and `mo.sh`) keeps working.
 
 ## Rate control (`patcher/patch_rc.py`, set C2)
@@ -98,7 +101,7 @@ plain text.
 | Setting | Where | Notes |
 |---|---|---|
 | Alarm zones | `devParam.dat` 0x314 | i32 count (max 25) + 25 × {u8 x, y, w, h} in tenths of the frame (10×10 grid). Read once when the event thread starts (`checkMdAreparams`, `0x16dc8`). Verified live |
-| Zone support | `support_mdzone` | 1 at runtime on this camera (`0x3a4ca8`, read from process memory) although neither `hwcfg.ini` nor a `defalut.config` sets it; what sets it is unknown |
+| Zone support | `support_mdzone` | 1 at runtime on this camera (`0x3a4ca8`, read from process memory) although neither `hwcfg.ini` nor a `defalut.config` sets it: a compiled-in block in the hwcfg loader `FUN_00019030` forces it to 1 |
 | Real threshold | `[config] motion_level` in `hwcfg.ini`, 0/1/2 | applied once at boot by `0x617bc`: moving blocks needed 15 / 4 / 1 (`md_setting_low/middle/high` override). Missing = 1. Verified live: `motion_level = 2` gives threshold 1 |
 | Level shown to the app | `devParam.dat` 0xe8 = 1/2/3 | only read back for the vendor app |
 | Motion tracking | `devParam.dat` 0x2d8 | while on, recording skips the zone check; see Tracking below |
@@ -191,6 +194,30 @@ chosen time were read from the running process.
 `mdcfg reboot <pid> [0|1]` reads and writes `0x3a4bf8` and prints `<on> <seconds after 02:00>`. Our camera's boot
 log shows one restart every night between 3 and 8 November (02:07 to 03:56). The night after a 17:28 boot was
 skipped, with only 10 h of uptime. Turning it off was checked in memory, not yet through a whole night.
+
+## Camera settings (`clean/cam.conf`)
+
+`debug_cmd.sh` merges `md.conf` and `cam.conf` into `/tmp/plus.conf`. Before `p2pcam` starts, `mdcfg apply` writes
+the devParam fields into the RAM copy, and the hwcfg keys are appended to the RAM copy of `hwcfg.ini` (the last line
+of a key wins; the `[config]` table is read after a compiled-in block that forces `support_mdzone`, the day/night
+thresholds and the volumes). After start-up `health.sh` runs `mdcfg live` once more, because `p2pcam` derives the
+person threshold from `motion_level` at start-up. The panel uses `mdcfg live` and `mdcfg state`.
+
+| Key | Where | Live | Notes |
+|---|---|---|---|
+| `night` / `day` | hwcfg `agcnight_value` (`0x3a4c54`, stored negative) / `agcday_value` (`0x3a4c5c`) | yes | `icrCtrlThd` polls every 0.5 s; 3 samples in a row, then a switch. More than 7 switches in 5 min lock night for 30 min |
+| `hourly` | hwcfg `only_wireless_bind` (`0x3a52c4`) + patch 17 | yes | `FUN_000370f8`: auto mode forces day for the first 10 s of every hour 04:00–16:59. `/tmp/forceday` still forces a check (at most once a minute) |
+| `person` | float `0x3a1418` | yes | stock sets 0.7 / 0.4 / 0.1 from `motion_level` 0 / 1 / 2 |
+| `recmode` | devParam `0x2c4` | 0↔1 | 2 = continuous + events, set up at start-up. Continuous segments are named `*.mp4`, event clips `*M.mp4` |
+| `volume` | devParam `0x3bc` (×10) | yes | read on every playback |
+| `voice` | empty RAM file over `/bak/VOICE.tgz` | yes | `start.sh` unpacks it into `/tmp/VOICE` after `debug_cmd.sh` |
+| `nightcolor` | devParam `0x2cc` | boot | 0 IR, 1 colour with the white light boosted on motion, 2 colour |
+| `osd` | hwcfg `osdtime_pos` → `0x39ff78` | boot | −1 off, 0 top left, 1 top right, 2 bottom left, 3 bottom right (verified: 3) |
+| `rotate` | devParam `0xfc` = 3 | boot | 180° (verified). `p2pcam` compensates its own PTZ moves; the panel swaps its arrows |
+
+Also on every boot: `devParam.dat(_bak)`, `extraParam.dat(_bak)` and `osdParam.dat(_bak)` are RAM copies, because
+every vendor save rewrites the `_bak` file too. `plus.sh` stops the stock factory test loop `auto_test.sh` and
+starts `clock.sh` (NTP from the default gateway every 6 h).
 
 ## Cloud endpoints
 

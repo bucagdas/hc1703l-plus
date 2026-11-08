@@ -35,6 +35,10 @@ Ayrıca:
 - **Hareket ayarları** panelde: hassasiyet, takip ve canlı önizleme üzerinde çizilen en çok 25 alarm
   bölgesi. Hassasiyet ve takip hemen, bölgeler yeniden başlatınca uygulanır. Her şey RAM'de kalır, ayarlar da
   flash'a dokunmaz.
+- **Kamera ayarları** panelde: gece görüntüsü (kızılötesi ya da renkli), geceye geçiş ve gündüze dönüş
+  zamanı, saat başı gündüz denemesi, kişi algılama eşiği, SD kayıt (hareket olayları, sürekli ya da kapalı),
+  hoparlör sesi, sesli uyarılar, saat damgasının köşesi ve 180° çevirme. `clean/cam.conf` içinde saklanır;
+  `p2pcam`'in yeniden okuduğu ayarlar hemen, diğerleri yeniden başlatınca uygulanır. Flash'a hiçbir şey yazılmaz.
 - **Hareket fotoğrafları** (`mo.sh`): her hareket klibi için bir fotoğraf, klibe bağlı.
 - **Düzeltmeler:** RTSP soket arabelleğinin yanlış sokete verilmesi, loş ışıkta kayıtların saniye
   atlaması, 554 portunun LAN'dan RTSP dışı komut kabul etmesi.
@@ -50,10 +54,11 @@ güç verilir
      │    ├─ netguard.sh    bulut engeli (RAM kopyası)
      │    ├─ boot.sh        SD kartı bekler, sonra health.sh'yi çalıştırır
      │    ├─ clean/p2pcam.sqfs ve clean/sensor.sh'nin RAM kopyalarını /bak üzerine bağlar   (flash'a dokunmaz)
-     │    └─ clean/md.conf'u devParam.dat ve hwcfg.ini'nin RAM kopyalarına uygular          (flash'a dokunmaz)
+     │    ├─ clean/md.conf ve cam.conf'u devParam.dat ve hwcfg.ini'nin RAM kopyalarına uygular   (flash'a dokunmaz)
+     │    └─ devParam/extraParam/osdParam ve _bak kopyalarını RAM'de tutar: üreticinin kayıtları flash'a gitmez
      ├─ sensor.sh → minihack.sh (temel hack: WiFi, telnet, FTP, httpd)
      └─ p2pcam (yamalı)
-health.sh  T+0 plus.sh (panel, galeri, hareket servisi)
+health.sh  T+0 plus.sh (panel, galeri, hareket servisi, 6 saatte bir saat eşitleme, fabrika test döngüsünü durdurur)
            T+5 dk  sağlıklıysa yükleyiciyi geri koyar; art arda 3 başarısız açılış → stokta kalır
            T+30 dk hâlâ sağlıklıysa başarısızlık sayaçlarını siler
 ```
@@ -78,7 +83,7 @@ değiştirmek kamerayı stoğa düşürmez.
    `http://<kamera>:8080` çalışıyor mu kontrol edin.
 2. Kameradan `/bak/p2pcam.sqfs` dosyasını bilgisayarınıza alın (FTP).
 3. Derleyin: `patcher/build.sh p2pcam.sqfs out/`. Yamalı `p2pcam` md5 değeri
-   `018f4c40708d3a2b3ba0a26343ab0f14` olmalı.
+   `718a2a38ad4a52c5618157c0995b2fd1` olmalı.
 4. SD kartın köküne kopyalayın: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` ve `out/p2pcam.md5` dosyalarını `clean/` içine koyun.
    **`debug_cmd.sh`'yi henüz kopyalamayın.**
@@ -96,6 +101,9 @@ rastgele bir saatte (kamera saatiyle) yapar. Kameranın yaklaşık 22 saattir a�
 yapılmıyor olması gerekir. Varsayılan olarak açıktır. Paneldeki Bakım kartında **Kapalı** seçilince
 `clean/NOREBOOT` yazılır. Ayar hemen ve her yamalı açılışta yeniden uygulanır. Stok açılışta yeniden başlatma hep
 açık kalır; böylece stoğa düşen bir kamera ertesi gece yamalı sürüme geri döner. Flash'a hiçbir şey yazılmaz.
+
+Temel hack saati açılışta bir kez ayarlar. Yeniden başlatma kapalıyken saat kaymasın diye `clock.sh` saati 6 saatte
+bir varsayılan ağ geçidinden (router) eşitler; bulut engeli açıkken ulaşılabilen tek zaman sunucusu odur.
 
 ## Kurtarma
 

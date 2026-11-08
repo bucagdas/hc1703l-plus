@@ -66,25 +66,43 @@ if [ -f $C/sensor.sh ]; then
   fi
 fi
 
-# Motion settings (clean/md.conf, written by the panel). RAM copies only: the files on flash stay as they are,
-# and a failure here just leaves the stock values in place.
-if [ -f $C/md.conf ]; then
-  if [ -f $C/bin/mdcfg ] && cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg &&
-     /tmp/mdcfg apply /home/devParam.dat /tmp/devParam.plus $C/md.conf &&
-     mount --bind /tmp/devParam.plus /home/devParam.dat; then
-    say "devParam bound"
+# Settings: clean/md.conf (motion card) and clean/cam.conf (camera card), both written by the panel. Applied to RAM
+# copies only: the files on flash stay as they are, and a failure here just leaves the stock values in place.
+P=/tmp/plus.conf
+cat $C/md.conf $C/cam.conf > $P 2>/dev/null
+kv(){ awk -F= -v k="$1" '$1==k{v=$2} END{print v}' $P; }
+[ -f $C/bin/mdcfg ] && cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg
+# devParam.dat is always a RAM copy on a patched boot, so a vendor save never reaches flash.
+if [ -s $P ] && [ -x /tmp/mdcfg ] && /tmp/mdcfg apply /home/devParam.dat /tmp/devParam.plus $P; then
+  M="devParam bound (settings)"
+else
+  cp /home/devParam.dat /tmp/devParam.plus
+  M="devParam bound (as is)"
+fi
+if mount --bind /tmp/devParam.plus /home/devParam.dat; then say "$M"; else say "devParam not bound: flash devParam"; fi
+# Every vendor save also rewrites a _bak copy (open O_TRUNC + write + fsync). Keep those and extraParam in RAM too.
+B=
+for f in devParam.dat_bak extraParam.dat extraParam.dat_bak osdParam.dat osdParam.dat_bak; do
+  [ -f /home/$f ] || continue
+  cp /home/$f /tmp/$f.plus && mount --bind /tmp/$f.plus /home/$f && B="$B $f"
+done
+say "home in RAM:$B"
+# hwcfg.ini [config]: the last line of a key wins, so appending is enough.
+H=
+L=$(kv sensitivity); case "$L" in 0|2) H="${H}motion_level = $L\n" ;; esac
+V=$(kv night); case "$V" in [1-9]*) case "$V" in *[!0-9]*) ;; *) H="${H}agcnight_value = -$V\n" ;; esac ;; esac
+V=$(kv day); case "$V" in [1-9]*) case "$V" in *[!0-9]*) ;; *) H="${H}agcday_value = $V\n" ;; esac ;; esac
+[ "$(kv hourly)" = 0 ] && H="${H}only_wireless_bind = 1\n"
+V=$(kv osd); case "$V" in -1|0|1|2|3) H="${H}osdtime_pos = $V\n" ;; esac
+if [ -n "$H" ]; then
+  if cp /bak/hwcfg.ini /tmp/hwcfg.plus && printf "\n$H" >> /tmp/hwcfg.plus && mount --bind /tmp/hwcfg.plus /bak/hwcfg.ini; then
+    say "hwcfg bound"
   else
-    say "devParam not bound: flash devParam"
+    say "hwcfg not bound"
   fi
-  L=$(awk -F= '/^sensitivity=/{print $2}' $C/md.conf)
-  case "$L" in
-    0|2)
-      if cp /bak/hwcfg.ini /tmp/hwcfg.plus && printf '\nmotion_level = %s\n' "$L" >> /tmp/hwcfg.plus &&
-         mount --bind /tmp/hwcfg.plus /bak/hwcfg.ini; then
-        say "hwcfg bound"
-      else
-        say "hwcfg not bound"
-      fi ;;
-  esac
+fi
+# Voice prompts off: start.sh unpacks /bak/VOICE.tgz into /tmp/VOICE later; an empty file there leaves it empty.
+if [ "$(kv voice)" = 0 ] && touch /tmp/voice.empty && mount --bind /tmp/voice.empty /bak/VOICE.tgz; then
+  say "voice prompts off"
 fi
 sync
