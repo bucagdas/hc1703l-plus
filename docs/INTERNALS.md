@@ -210,6 +210,8 @@ person threshold from `motion_level` at start-up. The panel uses `mdcfg live` an
 | `person` | float `0x3a1418` | yes | stock sets 0.7 / 0.4 / 0.1 from `motion_level` 0 / 1 / 2 |
 | `recmode` | devParam `0x2c4` | 0↔1 | 2 = continuous + events, set up at start-up. Continuous segments are named `*.mp4`, event clips `*M.mp4` |
 | `volume` | devParam `0x3bc` (×10) | yes | read on every playback |
+| `voice` | empty RAM file over `/bak/VOICE.tgz` | yes | `start.sh` unpacks it into `/tmp/VOICE` after `debug_cmd.sh`; the panel removes or re-unpacks the files live |
+| `mic` | devParam `0x3c0` (×10) | boot | index into the gain table at `0x261eb0` (`FUN_000b7cc4`, "mic Value"); 0 means hwcfg `mic_value` (8). Applied once when audio starts |
 | `nightcolor` | devParam `0x2cc` | boot | 0 IR, 1 colour with the white light boosted on motion, 2 colour |
 | `osd` | hwcfg `osdtime_pos` → `0x39ff78` | boot | −1 off, 0 top left, 1 top right, 2 bottom left, 3 bottom right (verified: 3) |
 | `rotate` | devParam `0xfc` = 3 | boot | 180° (verified). `p2pcam` compensates its own PTZ moves; the panel swaps its arrows |
@@ -217,6 +219,16 @@ person threshold from `motion_level` at start-up. The panel uses `mdcfg live` an
 Also on every boot: `devParam.dat(_bak)`, `extraParam.dat(_bak)` and `osdParam.dat(_bak)` are RAM copies, because
 every vendor save rewrites the `_bak` file too. `plus.sh` stops the stock factory test loop `auto_test.sh` and
 starts `clock.sh` (NTP from the default gateway every 6 h).
+
+## Sound
+
+The RTSP streams carry G.711 A-law, 8 kHz mono (`m=audio … a=control:…/0/audio`, 40 ms packets). `snd listen`
+(`tools/snd.c`) opens an RTSP session on `127.0.0.1:554`, sets up only the audio track over TCP and copies the
+A-law payload to the panel, which decodes it in the browser (Web Audio). One listener at a time; it ends when the
+page stops reading. `p2pcam` plays sounds with the 8001 command `playaudio?file=` (`FUN_000477fc`), which answers
+when the sound has finished; the stock prompts are 8 kHz mono A-law WAV files, so the panel turns a chosen sound file
+into the same format in the browser (at most 30 s, peak-normalised) and `snd recv` checks it before it is played.
+Live talk would need the browser microphone, which browsers only allow on secure origins (HTTPS or localhost).
 
 ## Cloud endpoints
 

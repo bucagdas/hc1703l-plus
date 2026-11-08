@@ -213,6 +213,8 @@ kullanır.
 | `person` | float `0x3a1418` | evet | stok, `motion_level` 0 / 1 / 2 için 0,7 / 0,4 / 0,1 kullanır |
 | `recmode` | devParam `0x2c4` | 0↔1 | 2 = sürekli + olay, açılışta kurulur. Sürekli kayıt parçaları `*.mp4`, olay klipleri `*M.mp4` adını alır |
 | `volume` | devParam `0x3bc` (×10) | evet | her çalmada okunur |
+| `voice` | `/bak/VOICE.tgz` üzerine boş bir RAM dosyası | evet | `start.sh`, `debug_cmd.sh`'den sonra onu `/tmp/VOICE` içine açar; panel dosyaları canlı siler ya da yeniden açar |
+| `mic` | devParam `0x3c0` (×10) | açılış | `0x261eb0`'daki kazanç tablosunun sırası (`FUN_000b7cc4`, "mic Value"); 0 ise hwcfg `mic_value` (8). Ses başlarken bir kez uygulanır |
 | `nightcolor` | devParam `0x2cc` | açılış | 0 kızılötesi, 1 renkli ve harekette beyaz ışık güçlenir, 2 renkli |
 | `osd` | hwcfg `osdtime_pos` → `0x39ff78` | açılış | −1 kapalı, 0 sol üst, 1 sağ üst, 2 sol alt, 3 sağ alt (doğrulandı: 3) |
 | `rotate` | devParam `0xfc` = 3 | açılış | 180° (doğrulandı). `p2pcam` kendi PTZ hareketlerini düzeltir; panel oklarını yer değiştirir |
@@ -220,6 +222,16 @@ kullanır.
 Ayrıca her açılışta: `devParam.dat(_bak)`, `extraParam.dat(_bak)` ve `osdParam.dat(_bak)` RAM kopyalarıdır, çünkü
 üreticinin her kaydı `_bak` dosyasını da yeniden yazar. `plus.sh` stok fabrika test döngüsü `auto_test.sh`'i
 durdurur ve `clock.sh`'yi başlatır (6 saatte bir varsayılan ağ geçidinden NTP).
+
+## Ses
+
+RTSP akışlarında G.711 A-law, 8 kHz mono ses var (`m=audio … a=control:…/0/audio`, 40 ms'lik paketler).
+`snd listen` (`tools/snd.c`), `127.0.0.1:554` üzerinde bir RTSP oturumu açar, TCP üzerinden yalnız ses izini kurar
+ve A-law yükünü panele aktarır; panel onu tarayıcıda çözer (Web Audio). Aynı anda tek dinleyici olur; sayfa
+okumayı bırakınca biter. `p2pcam` sesi 8001 komutu `playaudio?file=` ile çalar (`FUN_000477fc`); komut ses bitince
+yanıt verir. Stok uyarılar 8 kHz mono A-law WAV dosyalarıdır; panel seçilen ses dosyasını tarayıcıda aynı biçime
+çevirir (en çok 30 sn, tepe normalize) ve `snd recv` çalınmadan önce dosyayı denetler. Canlı konuşma tarayıcı
+mikrofonunu ister; tarayıcılar mikrofona yalnız güvenli kaynaklarda (HTTPS ya da localhost) izin verir.
 
 ## Bulut uç noktaları
 

@@ -11,7 +11,9 @@
 #   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; sensitivity and tracking apply at once, zones at the next boot
 #   POST webui?c=nightly_on|nightly_off   nightly restart of the stock p2pcam: kept in clean/NOREBOOT, applied at once
 #   GET  webui?s=cam                camera settings: saved (clean/cam.conf) and running ("now_" prefix)
-#   POST webui?c=cam_save&v=n200.d3300.h1.p0.r1.v6.c0.o1.t0   save clean/cam.conf; live where possible
+#   POST webui?c=cam_save&v=n200.d3300.h1.p0.r1.v6.s1.m8.c0.o1.t0   save clean/cam.conf; live where possible
+#   GET  webui?s=listen             live microphone: raw 8 kHz A-law from the RTSP audio track (clean/bin/snd)
+#   POST webui?c=chime              play the test chime;  POST webui?c=speak (body: 8 kHz A-law WAV, <= 30 s)
 #   POST webui?c=day_retest          let auto mode re-check daylight now (/tmp/forceday)
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
@@ -170,9 +172,38 @@ nightly_set(){
 # Camera settings live in clean/cam.conf (keys in tools/mdcfg.c). debug_cmd.sh applies them to RAM copies at boot;
 # mdcfg live applies what p2pcam re-reads. Night picture, continuous recording, time stamp and turn need a boot.
 kv(){ awk -F= -v k="$1" '$1==k{v=$2} END{print v}' "$2" 2>/dev/null; }
+snd_tool(){ [ -x /tmp/snd ] || { cp $C/bin/snd /tmp/snd && chmod 755 /tmp/snd; }; [ -x /tmp/snd ]; }
+# Sounds go through p2pcam's own player (playaudio), which answers when the sound has finished.
+# One sound at a time; a lock older than 60 s is stale (a killed request cannot release it).
+play_lock(){
+  read u _ < /proc/uptime; u=${u%%.*}
+  if ! mkdir /tmp/snd.lock 2>/dev/null; then
+    t=; read t < /tmp/snd.lock/t 2>/dev/null
+    case "$t" in ''|*[!0-9]*) t=0 ;; esac
+    [ $((u - t)) -gt 60 ] || return 1
+    rm -rf /tmp/snd.lock; mkdir /tmp/snd.lock 2>/dev/null || return 1
+  fi
+  echo $u > /tmp/snd.lock/t
+}
+chime(){
+  snd_tool || { echo "ERR no_sd"; return 1; }
+  play_lock || { echo "ERR busy"; return 1; }
+  [ -s /tmp/chime.wav ] || /tmp/snd tone /tmp/chime.wav
+  h 'playaudio?file=/tmp/chime.wav'; rm -rf /tmp/snd.lock
+  echo "OK chimed"
+}
+speak(){
+  case "$CONTENT_LENGTH" in ''|*[!0-9]*) echo "ERR invalid"; return 1 ;; esac
+  snd_tool || { echo "ERR no_sd"; return 1; }
+  play_lock || { echo "ERR busy"; return 1; }
+  if /tmp/snd recv /tmp/speak.wav "$CONTENT_LENGTH"; then h 'playaudio?file=/tmp/speak.wav'; r="OK spoke"; else r="ERR invalid"; fi
+  rm -f /tmp/speak.wav; rm -rf /tmp/snd.lock
+  echo "$r"
+}
 cam_read(){
   pid=$(p2p_pid)
   [ -n "$pid" ] && tool && /tmp/mdcfg state "$pid" 2>/dev/null | sed 's/^/now_/'
+  ls /tmp/VOICE/*.wav >/dev/null 2>&1 && echo "now_voice=1" || echo "now_voice=0"
   [ -f $C/cam.conf ] && cat $C/cam.conf
 }
 cam_save(){
@@ -188,6 +219,8 @@ cam_save(){
       p0|p10|p40|p70) echo "person=${p#p}" ;;
       r[012]) echo "recmode=${p#r}" ;;
       v[1-9]|v10) echo "volume=${p#v}" ;;
+      s[01]) echo "voice=${p#s}" ;;
+      m4|m8|m10) echo "mic=${p#m}" ;;
       c[012]) echo "nightcolor=${p#c}" ;;
       o-1|o[0-3]) echo "osd=${p#o}" ;;
       t[01]) echo "rotate=${p#t}" ;;
@@ -203,9 +236,16 @@ cam_save(){
   if [ -f /tmp/p2pcam.clean.sqfs ] && [ -n "$pid" ] && [ "$(md /proc/$pid/exe)" = "$(cat $C/p2pcam.md5 2>/dev/null)" ]; then
     cat $C/md.conf $C/cam.conf > /tmp/plus.live 2>/dev/null
     /tmp/mdcfg live "$pid" /tmp/plus.live >/dev/null 2>&1 && ok=1
+    # Voice prompts live: remove the unpacked files, or unpack them again (lifting the boot-time empty bind).
+    if [ "$(kv voice $C/cam.conf)" = 0 ]; then
+      rm -f /tmp/VOICE/*.wav
+    elif ! ls /tmp/VOICE/*.wav >/dev/null 2>&1; then
+      grep -q ' /bak/VOICE.tgz ' /proc/mounts && umount /bak/VOICE.tgz
+      tar -xf /bak/VOICE.tgz -C /tmp >/dev/null 2>&1 || ok=0
+    fi
     # Anything p2pcam does not take live (or did not take) needs a boot.
     /tmp/mdcfg state "$pid" > /tmp/cam.now 2>/dev/null || ok=0
-    for k in night day recmode volume nightcolor rotate osd; do
+    for k in night day recmode volume mic nightcolor rotate osd; do
       w=$(kv $k $C/cam.conf)
       [ -z "$w" ] || [ "$w" = "$(kv $k /tmp/cam.now)" ] || ok=0
     done
@@ -285,6 +325,8 @@ command(){
     ptz_save)     ptz_save; return ;;
     ptz_go)       ptz_go; return ;;
     cam_save)     cam_save; return ;;
+    chime)        chime; return ;;
+    speak)        speak; return ;;
     day_retest)   touch /tmp/forceday; sleep 2; rm -f /tmp/forceday; echo "OK day_retest"; return ;;
     nightly_on)   nightly_set 1; return ;;
     nightly_off)  nightly_set 0; return ;;
@@ -340,6 +382,11 @@ case "$s" in
   status) text; status; exit 0 ;;
   md) text; md_read; exit 0 ;;
   cam) text; cam_read; exit 0 ;;
+  listen)
+    # One listener at a time: each one is an RTSP session on p2pcam.
+    if ! snd_tool || [ "$(ps | grep -c '[s]nd listen')" -ge 1 ]; then text; echo "busy"; exit 0; fi
+    echo "Content-type: application/octet-stream"; echo "Cache-Control: no-store"; echo ""
+    exec /tmp/snd listen 900 ;;
   snap)
     f=/tmp/wsnap.$$.jpg
     httpclt getfile "http://127.0.0.1:8001/snapshot" $f >/dev/null 2>&1
@@ -433,6 +480,14 @@ button.sw.on .knob::after{left:16px}
 .grid3>.cb{border-right:1px solid var(--line2)}
 .grid3>.cb:last-child{border-right:0}
 @media (max-width:900px){.grid3{grid-template-columns:minmax(0,1fr)}.grid3>.cb{border-right:0;border-bottom:1px solid var(--line2)}.grid3>.cb:last-child{border-bottom:0}}
+details.sound{border-top:1px solid var(--line2)}
+details.sound>summary{list-style:none;display:flex;align-items:center;gap:8px;min-height:46px;padding:0 20px;cursor:pointer;font-size:14px;font-weight:600}
+details.sound>summary::-webkit-details-marker{display:none}
+details.sound .chev{color:var(--muted);transition:transform .15s}
+details.sound[open] .chev{transform:rotate(90deg)}
+details.sound>.grid3{border-top:1px solid var(--line2)}
+.meter{display:inline-block;width:96px;height:8px;border-radius:4px;background:var(--track);overflow:hidden}
+.meter>i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
 @media (max-width:600px){.set .seg{display:flex;width:100%}.set .seg button{flex:1 1 0;min-height:44px;min-width:0;padding:0 6px}}
 #preview{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;object-fit:contain}
 #pvwrap{position:relative}
@@ -462,8 +517,8 @@ a.btnlink{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;m
 a.btnlink:hover{border-color:var(--accent)}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;max-height:360px;overflow:auto;background:var(--bg);padding:10px;border-radius:8px;margin:0}
 details>summary{cursor:pointer;font-weight:600}
-details .row{margin-top:10px}
-details button{font:12px ui-monospace,Menlo,monospace}
+details.adv .row{margin-top:10px}
+details.adv button{font:12px ui-monospace,Menlo,monospace}
 body>footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:var(--muted)}
 </style>
 </head>
@@ -702,21 +757,63 @@ body>footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;co
             </div>
             <p class="hint" data-i18n="h_rotate">When turned, the panel arrows swap too.</p>
           </div>
-          <div class="set" data-key="v">
-            <div class="lab"><span data-i18n="cam_vol">Speaker volume</span><span class="dot" aria-hidden="true"></span></div>
-            <div class="seg" role="group" data-i18n-label="cam_vol">
-              <button type="button" data-cam="v" data-v="2" data-i18n="s_low">Low</button>
-              <button type="button" data-cam="v" data-v="6" data-i18n="s_mid">Medium</button>
-              <button type="button" data-cam="v" data-v="10" data-i18n="s_high">High</button>
+        </div>
+      </div>
+      <details class="sound" id="sounds">
+        <summary><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg><span data-i18n="snd_title">Sound settings</span></summary>
+        <div class="grid3">
+          <div class="cb">
+            <div class="set" data-key="v">
+              <div class="lab"><span data-i18n="cam_vol">Speaker volume</span><span class="dot" aria-hidden="true"></span></div>
+              <div class="line">
+                <div class="seg" role="group" data-i18n-label="cam_vol">
+                  <button type="button" data-cam="v" data-v="2" data-i18n="s_low">Low</button>
+                  <button type="button" data-cam="v" data-v="6" data-i18n="s_mid">Medium</button>
+                  <button type="button" data-cam="v" data-v="10" data-i18n="s_high">High</button>
+                </div>
+                <button type="button" id="chime" data-i18n="chime">Test sound</button>
+              </div>
+              <p class="hint" data-i18n="h_chime">The test sound uses the saved volume.</p>
+            </div>
+            <div class="set" data-key="s">
+              <div class="lab"><span data-i18n="cam_voice">Voice prompts</span><span class="dot" aria-hidden="true"></span></div>
+              <div class="seg" role="group" data-i18n-label="cam_voice">
+                <button type="button" data-cam="s" data-v="1" data-i18n="on">On</button>
+                <button type="button" data-cam="s" data-v="0" data-i18n="off">Off</button>
+              </div>
+              <p class="hint" data-i18n="h_voice">The stock setup prompts (Wi-Fi, reset).</p>
+            </div>
+          </div>
+          <div class="cb">
+            <div class="set" data-key="m">
+              <div class="lab"><span data-i18n="cam_mic">Microphone sensitivity</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="dot" aria-hidden="true"></span></div>
+              <div class="seg" role="group" data-i18n-label="cam_mic">
+                <button type="button" data-cam="m" data-v="4" data-i18n="s_low">Low</button>
+                <button type="button" data-cam="m" data-v="8" data-i18n="s_mid">Medium</button>
+                <button type="button" data-cam="m" data-v="10" data-i18n="s_high">High</button>
+              </div>
+            </div>
+            <div class="set">
+              <div class="lab" data-i18n="listen_title">Live listening</div>
+              <div class="line"><button type="button" id="listen" aria-pressed="false" data-i18n="listen">Listen</button><span class="meter" aria-hidden="true"><i id="lvl"></i></span></div>
+              <p class="hint" data-i18n="h_listen">From the camera microphone, about a second behind. VLC also plays the RTSP address with sound.</p>
+            </div>
+          </div>
+          <div class="cb">
+            <div class="set">
+              <div class="lab" data-i18n="send_title">Send sound</div>
+              <div class="line"><button type="button" id="sndpick" data-i18n="snd_pick">Choose a sound file</button><input type="file" id="sndfile" accept="audio/*" hidden></div>
+              <p class="hint" data-i18n="h_send">Up to 30 s, played on the camera speaker. On Android the file picker can also record. Live talk needs HTTPS.</p>
+              <p class="hint" id="sndstat" role="status"></p>
             </div>
           </div>
         </div>
-      </div>
+      </details>
       <div class="cf"><span class="sum" id="camsum" role="status"></span><div class="row"><button type="button" id="camreset" data-i18n="cancel">Cancel</button><button type="button" id="camsave" class="primary" data-i18n="md_save">Save</button></div></div>
     </section>
     <section class="card wide">
       <div class="cb">
-        <details>
+        <details class="adv">
           <summary data-i18n="advanced">Advanced: original test commands</summary>
           <p class="hint" style="margin-top:8px" data-i18n="adv_note">The commands of the original Augentix page, unchanged.</p>
           <div class="row">
@@ -773,7 +870,7 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  cam_night:'Switch to night',cam_day:'Back to day',earlier:'Earlier',dflt:'Default',later:'Later',cam_hourly:'Hourly day check',retest:'Check now',
  cam_person:'Person detection',p0:'Auto',p70:'Strict',p40:'Medium',p10:'Loose',cam_rec:'SD recording',r1:'Motion events',r2:'Continuous',
  cam_vol:'Speaker volume',cam_osd:'Time stamp',o0:'Top left',o1:'Top right',o2:'Bottom left',o3:'Bottom right',cam_rotate:'Picture direction',t0:'Normal',t1:'180°',
- g_daynight:'Night and day',g_detrec:'Detection and recording',g_picsound:'Picture and sound',boot_legend:'Applies after a reboot',
+ g_daynight:'Night and day',g_detrec:'Detection and recording',g_picsound:'Picture',snd_title:'Sound settings',chime:'Test sound',h_chime:'The test sound uses the saved volume.',cam_voice:'Voice prompts',h_voice:'The stock setup prompts (Wi-Fi, reset).',cam_mic:'Microphone sensitivity',listen_title:'Live listening',listen:'Listen',listen_stop:'Stop',h_listen:'From the camera microphone, about a second behind. VLC also plays the RTSP address with sound.',listen_fail:'Listening could not start',listen_busy:'Someone else is already listening',listen_end:'Listening stopped',send_title:'Send sound',snd_pick:'Choose a sound file',h_send:'Up to 30 s, played on the camera speaker. On Android the file picker can also record. Live talk needs HTTPS.',snd_prep:'Preparing the sound…',snd_play:'Playing on the camera ({0} s)…',snd_long:'only the first 30 s are sent',snd_bad:'This file could not be read.',chimed:'test sound played',spoke:'sound played',ERR_busy:'the speaker is busy, try again in a moment',boot_legend:'Applies after a reboot',
  h_nightcolor:'Colour modes turn the white light on at night.',h_day:'Returning too early can make the camera switch back and forth.',
  h_hourly:'04:00–17:00. When off, a dim room may stay in night mode all day.',h_person:'Auto follows the motion sensitivity.',
  h_rec:'Continuous recording fills the card fast and deletes the oldest days first.',h_rotate:'When turned, the panel arrows swap too.',
@@ -807,7 +904,7 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  cam_night:'Geceye geçiş',cam_day:'Gündüze dönüş',earlier:'Erken',dflt:'Varsayılan',later:'Geç',cam_hourly:'Saat başı gündüz denemesi',retest:'Şimdi dene',
  cam_person:'Kişi algılama',p0:'Otomatik',p70:'Sıkı',p40:'Orta',p10:'Gevşek',cam_rec:'SD kayıt',r1:'Hareket olayları',r2:'Sürekli',
  cam_vol:'Hoparlör sesi',cam_osd:'Saat damgası',o0:'Sol üst',o1:'Sağ üst',o2:'Sol alt',o3:'Sağ alt',cam_rotate:'Görüntü yönü',t0:'Normal',t1:'180°',
- g_daynight:'Gece ve gündüz',g_detrec:'Algılama ve kayıt',g_picsound:'Görüntü ve ses',boot_legend:'Yeniden başlatınca uygulanır',
+ g_daynight:'Gece ve gündüz',g_detrec:'Algılama ve kayıt',g_picsound:'Görüntü',snd_title:'Ses ayarları',chime:'Test sesi',h_chime:'Test sesi kayıtlı ses düzeyiyle çalar.',cam_voice:'Sesli uyarılar',h_voice:'Stok yazılımın kurulum uyarıları (WiFi, sıfırlama).',cam_mic:'Mikrofon hassasiyeti',listen_title:'Canlı dinleme',listen:'Dinle',listen_stop:'Durdur',h_listen:'Kamera mikrofonundan, yaklaşık bir saniye gecikmeli. VLC de RTSP adresini sesli çalar.',listen_fail:'Dinleme başlatılamadı',listen_busy:'Başka biri zaten dinliyor',listen_end:'Dinleme durdu',send_title:'Ses gönder',snd_pick:'Ses dosyası seç',h_send:'En çok 30 sn, kameranın hoparlöründe çalınır. Android\'de dosya seçici kayıt da yapabilir. Canlı konuşma HTTPS ister.',snd_prep:'Ses hazırlanıyor…',snd_play:'Kamerada çalınıyor ({0} sn)…',snd_long:'yalnız ilk 30 sn gönderilir',snd_bad:'Bu dosya okunamadı.',chimed:'test sesi çalındı',spoke:'ses çalındı',ERR_busy:'hoparlör meşgul, biraz sonra tekrar deneyin',boot_legend:'Yeniden başlatınca uygulanır',
  h_nightcolor:'Renkli modlarda geceleri beyaz ışık yanar.',h_day:'Çok erken dönüş, kameranın gidip gelmesine yol açabilir.',
  h_hourly:'04:00–17:00. Kapalıyken loş bir oda gün boyu gece modunda kalabilir.',h_person:'Otomatik: hareket hassasiyetini izler.',
  h_rec:'Sürekli kayıt kartı hızla doldurur, önce en eski günleri siler.',h_rotate:'Ters çevrilince paneldeki oklar da yer değiştirir.',
@@ -1048,8 +1145,8 @@ $('#mdreset').onclick=function(){
   drawMd();
 };
 // Camera settings. Each button group edits one key; a key without a saved value shows what p2pcam runs with now.
-var CK={c:'nightcolor',n:'night',d:'day',h:'hourly',p:'person',r:'recmode',v:'volume',o:'osd',t:'rotate'},cam={},camBase={};
-var BOOTK={c:1,o:1,t:1};
+var CK={c:'nightcolor',n:'night',d:'day',h:'hourly',p:'person',r:'recmode',v:'volume',s:'voice',m:'mic',o:'osd',t:'rotate'},cam={},camBase={};
+var BOOTK={c:1,o:1,t:1,m:1};
 function drawCam(){
   document.querySelectorAll('button[data-cam]').forEach(function(b){b.classList.toggle('on',cam[b.dataset.cam]===b.dataset.v)});
   var n=0,boot=0;
@@ -1086,6 +1183,61 @@ $('#camsave').onclick=function(){
     return send('reboot').then(function(){msg(t('md_rebooting'),'good')});
   }).catch(function(){msg(t('neterr',t('cam_name')),'bad')});
 };
+// Sound. G.711 A-law both ways: the camera's microphone track and its player (playaudio) use 8 kHz mono A-law.
+function alawDecodeTable(){var t=new Float32Array(256);for(var i=0;i<256;i++){var a=i^0x55,v=(a&0x0f)<<4,seg=(a&0x70)>>4;v+=seg?0x108:8;if(seg>1)v<<=seg-1;t[i]=(a&0x80?v:-v)/32768}return t}
+function alawEncode(x){var s=Math.max(-32768,Math.min(32767,Math.round(x*32767))),sign=s<0?0x80:0;if(s<0)s=-s-1;s>>=3;var seg=0;while(seg<7&&s>=(32<<seg))seg++;var m=seg?(s>>seg)&0x0f:(s>>1)&0x0f;return (sign|seg<<4|m)^0xd5}
+var AC=window.AudioContext||window.webkitAudioContext,lis=null,ALAW=alawDecodeTable();
+function listenUi(on){var b=$('#listen');b.textContent=t(on?'listen_stop':'listen');b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');if(!on)$('#lvl').style.width='0'}
+function stopListen(note){if(!lis)return;var l=lis;lis=null;try{l.ctrl.abort()}catch(e){}try{l.ctx.close()}catch(e){}listenUi(false);if(note)msg(note,'bad')}
+$('#listen').onclick=function(){
+  if(lis){stopListen();return}
+  if(!AC||!window.fetch||!window.ReadableStream){msg(t('listen_fail'),'bad');return}
+  var ctx=new AC(),ctrl=window.AbortController?new AbortController():null,head=0,me={ctx:ctx,ctrl:ctrl||{abort:function(){}}};
+  lis=me;listenUi(true);
+  function play(u8){
+    var n=u8.length;if(!n)return;
+    var sr=ctx.sampleRate,r=sr/8000,m=Math.floor(n*r),buf=ctx.createBuffer(1,m,sr),d=buf.getChannelData(0),sum=0;
+    for(var i=0;i<m;i++){var p=i/r,k=Math.floor(p),f=p-k,a=ALAW[u8[k]],b=ALAW[u8[k+1<n?k+1:k]],v=(a+(b-a)*f)*3;v=v>1?1:v<-1?-1:v;d[i]=v;sum+=v*v}
+    var now=ctx.currentTime;if(head<now+0.05||head>now+1.5)head=now+0.35;
+    var src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.start(head);head+=m/sr;
+    var db=sum>0?10*Math.log(sum/m)/Math.LN10:-90;$('#lvl').style.width=Math.max(0,Math.min(100,Math.round((db+66)*100/60)))+'%';
+  }
+  fetch('webui?s=listen&t='+Date.now(),{cache:'no-store',signal:ctrl?ctrl.signal:undefined}).then(function(res){
+    if((res.headers.get('content-type')||'').indexOf('octet')<0)throw new Error('busy');
+    var rd=res.body.getReader();
+    function pump(){return rd.read().then(function(x){if(lis!==me)return;if(x.done){stopListen(t('listen_end'));return}play(x.value);return pump()})}
+    return pump();
+  }).catch(function(e){if(lis===me)stopListen(t(e&&e.message==='busy'?'listen_busy':'listen_fail'))});
+};
+$('#chime').onclick=function(){var name=t('chime');msg(t('sending',name));send('chime').then(function(r){var x=reply(r);msg(name+': '+x[0],x[1])},function(){msg(t('neterr',name),'bad')})};
+// A file the browser can decode becomes an 8 kHz A-law WAV of at most 30 s, peak-normalised; the camera only plays it.
+function toWav(ab){
+  var ctx=new AC();
+  return new Promise(function(ok,bad){ctx.decodeAudioData(ab,ok,bad)}).then(function(b){
+    try{ctx.close()}catch(e){}
+    var sr=b.sampleRate,len=b.length,ch=b.numberOfChannels,mono=new Float32Array(len);
+    for(var c=0;c<ch;c++){var x=b.getChannelData(c);for(var i=0;i<len;i++)mono[i]+=x[i]/ch}
+    var r=sr/8000,n=Math.min(Math.floor(len/r),8000*30),out=new Float32Array(n),peak=0;
+    for(var j=0;j<n;j++){var a=Math.floor(j*r),z=Math.max(a+1,Math.floor((j+1)*r)),s=0;for(var k=a;k<z&&k<len;k++)s+=mono[k];out[j]=s/(z-a);if(Math.abs(out[j])>peak)peak=Math.abs(out[j])}
+    var g=peak>0?0.9/peak:1,w=new Uint8Array(44+n),dv=new DataView(w.buffer);
+    function str(o,t){for(var i=0;i<t.length;i++)w[o+i]=t.charCodeAt(i)}
+    str(0,'RIFF');dv.setUint32(4,36+n,true);str(8,'WAVEfmt ');dv.setUint32(16,16,true);dv.setUint16(20,6,true);dv.setUint16(22,1,true);
+    dv.setUint32(24,8000,true);dv.setUint32(28,8000,true);dv.setUint16(32,1,true);dv.setUint16(34,8,true);str(36,'data');dv.setUint32(40,n,true);
+    for(var q=0;q<n;q++)w[44+q]=alawEncode(out[q]*g);
+    return {wav:w,secs:n/8000,cut:len/r>8000*30};
+  });
+}
+$('#sndpick').onclick=function(){$('#sndfile').click()};
+$('#sndfile').onchange=function(){
+  var f=this.files&&this.files[0];this.value='';if(!f)return;
+  var st=$('#sndstat');st.textContent=t('snd_prep');
+  if(!AC){st.textContent=t('snd_bad');return}
+  (f.arrayBuffer?f.arrayBuffer():new Response(f).arrayBuffer()).then(toWav).then(function(o){
+    st.textContent=t('snd_play',(Math.round(o.secs*10)/10).toString().replace('.',lang==='tr'?',':'.'))+(o.cut?' · '+t('snd_long'):'');
+    return fetch('webui?c=speak',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/octet-stream'},body:o.wav}).then(function(r){return r.text()});
+  }).then(function(x){var y=reply(x.trim());st.textContent=y[0];msg(t('send_title')+': '+y[0],y[1])},function(){st.textContent=t('snd_bad')});
+};
+try{var so=$('#sounds');so.open=localStorage.getItem('hc_sound')==='1';so.addEventListener('toggle',function(){try{localStorage.setItem('hc_sound',so.open?'1':'0')}catch(e){}})}catch(e){}
 $('#logbtn').onclick=function(){
   var p=$('#logs');
   if(!p.hidden){p.hidden=true;this.textContent=t('logs_show');return}

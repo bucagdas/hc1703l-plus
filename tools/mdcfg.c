@@ -23,6 +23,7 @@
  *   hourly=0|1                L   hourly forced-day probe 04:00-16:59 (patch 17; boot: hwcfg only_wireless_bind)
  *   recmode=0|1|2             BL  SD recording: off, events, continuous + events (live only between 0 and 1)
  *   volume=1..10              BL  speaker level
+ *   mic=1..10                 B   microphone gain (index into p2pcam's gain table, read when audio starts)
  *   nightcolor=0|1|2          B   night: IR black and white, colour + white light on motion, colour
  *   rotate=0|1                B   1 = picture turned 180 degrees
  *
@@ -47,6 +48,7 @@
 #define OFF_RECMODE 0x2c4
 #define OFF_NIGHTCOLOR 0x2cc
 #define OFF_VOLUME 0x3bc
+#define OFF_MIC 0x3c0
 #define MAX_ZONES 25
 #define EVENT_OFF 2
 
@@ -68,6 +70,7 @@
 #define VA_PERSON     0x3a1418u  /* float person score threshold, set once at start-up from motion_level */
 #define VA_OSDPOS     0x39ff78u  /* time stamp corner in use: -1 off, 0..3 */
 #define VA_VOICE_VOL  0x3a4c40u  /* hwcfg voice_volume, used when devParam 0x3bc is 0 */
+#define VA_MIC_VALUE  0x3a4cacu  /* hwcfg mic_value, used when devParam 0x3c0 is 0 */
 
 static uint8_t b[FILE_SIZE];
 
@@ -148,6 +151,10 @@ static int apply(const char *in, const char *out, const char *conf)
             int m = atoi(v);
             if (m < 0 || m > 2) { fclose(f); fprintf(stderr, "mdcfg: bad nightcolor\n"); return 1; }
             wr32(OFF_NIGHTCOLOR, m);
+        } else if (!strcmp(line, "mic")) {
+            int n = atoi(v);
+            if (n < 1 || n > 10) { fclose(f); fprintf(stderr, "mdcfg: bad mic\n"); return 1; }
+            wr32(OFF_MIC, n * 10);
         } else if (!strcmp(line, "rotate")) {
             b[OFF_FLIP] = atoi(v) ? 3 : 0;
         }
@@ -221,7 +228,7 @@ static int probe_patched(int fd)
 }
 
 /* What p2pcam runs with now. Fails if any value looks wrong for the supported build. */
-struct now { int32_t thresh, track, night, day, noprobe, recmode, volume, voicevol, nightcolor, osd; float person; uint8_t flip; };
+struct now { int32_t thresh, track, night, day, noprobe, recmode, volume, voicevol, mic, micvalue, nightcolor, osd; float person; uint8_t flip; };
 
 static int read_now(int fd, uint32_t dev, struct now *n)
 {
@@ -229,11 +236,12 @@ static int read_now(int fd, uint32_t dev, struct now *n)
         rd32m(fd, VA_AGC_NIGHT, &n->night) || rd32m(fd, VA_AGC_DAY, &n->day) ||
         rd32m(fd, VA_NOPROBE, &n->noprobe) || rd32m(fd, dev + OFF_RECMODE, &n->recmode) ||
         rd32m(fd, dev + OFF_VOLUME, &n->volume) || rd32m(fd, VA_VOICE_VOL, &n->voicevol) ||
+        rd32m(fd, dev + OFF_MIC, &n->mic) || rd32m(fd, VA_MIC_VALUE, &n->micvalue) ||
         rd32m(fd, dev + OFF_NIGHTCOLOR, &n->nightcolor) || rd32m(fd, VA_OSDPOS, &n->osd) ||
         pread(fd, &n->person, 4, VA_PERSON) != 4 || pread(fd, &n->flip, 1, dev + OFF_FLIP) != 1)
         return -1;
     if (n->night >= 0 || n->night < -100000 || n->day <= 0 || n->day > 1000000 || (uint32_t)n->noprobe > 1 ||
-        (uint32_t)n->recmode > 3 || (uint32_t)n->volume > 100 || (uint32_t)n->nightcolor > 2 ||
+        (uint32_t)n->recmode > 3 || (uint32_t)n->volume > 100 || (uint32_t)n->mic > 100 || (uint32_t)n->nightcolor > 2 ||
         !(n->person >= 0.0f && n->person <= 1.0f) || n->osd < -1 || n->osd > 3 || n->flip > 3)
         return -1;
     return 0;
@@ -251,10 +259,10 @@ static int state(int pid)
     close(fd);
     if (!ok) { fprintf(stderr, "mdcfg: unexpected values\n"); return 1; }
     printf("sensitivity=%d\ntracking=%d\nperson=%d\nnight=%d\nday=%d\nhourly=%d\nhourly_switch=%d\n"
-           "recmode=%d\nvolume=%d\nnightcolor=%d\nrotate=%d\nosd=%d\n",
+           "recmode=%d\nvolume=%d\nmic=%d\nnightcolor=%d\nrotate=%d\nosd=%d\n",
            sens_of(n.thresh), n.track ? 1 : 0, (int)(n.person * 100.0f + 0.5f), -n.night, n.day,
            patched && n.noprobe ? 0 : 1, patched, n.recmode == 3 ? 2 : n.recmode,
-           n.volume ? n.volume / 10 : n.voicevol, n.nightcolor, n.flip == 3, n.osd);
+           n.volume ? n.volume / 10 : n.voicevol, n.mic ? n.mic / 10 : n.micvalue, n.nightcolor, n.flip == 3, n.osd);
     return 0;
 }
 

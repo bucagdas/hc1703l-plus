@@ -34,9 +34,13 @@ Plus also adds:
   preview. Sensitivity and tracking apply at once; zones after a reboot. Everything stays in RAM, so settings do
   not touch flash either.
 - **Camera settings** in the panel: night picture (infrared or colour), when to switch to night and back to day,
-  the hourly day check, person detection threshold, SD recording (motion events, continuous or off), speaker
-  volume, time stamp corner and a 180° turn. Kept in `clean/cam.conf`; what `p2pcam` re-reads
-  applies at once, the rest after a reboot. Nothing goes to flash.
+  the hourly day check, person detection threshold, SD recording (motion events, continuous or off), time stamp
+  corner and a 180° turn. Kept in `clean/cam.conf`; what `p2pcam` re-reads applies at once, the rest after a
+  reboot. Nothing goes to flash.
+- **Sound settings** (a section of the camera card that opens on click): speaker volume with a test sound, voice
+  prompts on or off, microphone sensitivity, **live listening** in the browser (the camera's microphone, about a
+  second behind) and **send a sound file** to the camera speaker (up to 30 s; on Android the file picker can also
+  record). Live talk from the browser microphone needs HTTPS: browsers keep the microphone off on plain-HTTP pages.
 - **Motion snapshots** (`mo.sh`): one snapshot per motion clip, linked to it.
 - **Fixes:** RTSP socket buffer on the wrong socket, recordings skipping seconds in dim light, vendor
   port 554 accepting non-RTSP commands from the LAN.
@@ -141,8 +145,8 @@ re-syncs it every 6 hours from the default gateway (the router), the only time s
 - [@Jalecom](https://github.com/Jalecom) for the [base hack and teardown](https://github.com/Jalecom/AJ_HC1703L_Teardown), which this project
   builds on and requires, and the contributors listed there.
 - mp4box.js 0.5.2 by GPAC (BSD 3-Clause) is included for in-browser playback.
-- `sdcard/clean/bin/mdcfg` and `ptzpos` are static ARM builds of `tools/mdcfg.c` and `tools/ptzpos.c` (build
-  command in the source).
+- `sdcard/clean/bin/mdcfg`, `ptzpos` and `snd` are static ARM builds of `tools/mdcfg.c`, `tools/ptzpos.c` and
+  `tools/snd.c` (build command in the source).
 - This repository contains only HC1703L Plus code, MIT licensed ([LICENSE](LICENSE)). The base hack is
   not included; get it from its own repository.
 - Not affiliated with Augentix or Tange. No vendor binaries are distributed. Use at your own risk.

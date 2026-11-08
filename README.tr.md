@@ -37,8 +37,12 @@ Ayrıca:
   flash'a dokunmaz.
 - **Kamera ayarları** panelde: gece görüntüsü (kızılötesi ya da renkli), geceye geçiş ve gündüze dönüş
   zamanı, saat başı gündüz denemesi, kişi algılama eşiği, SD kayıt (hareket olayları, sürekli ya da kapalı),
-  hoparlör sesi, saat damgasının köşesi ve 180° çevirme. `clean/cam.conf` içinde saklanır;
-  `p2pcam`'in yeniden okuduğu ayarlar hemen, diğerleri yeniden başlatınca uygulanır. Flash'a hiçbir şey yazılmaz.
+  saat damgasının köşesi ve 180° çevirme. `clean/cam.conf` içinde saklanır; `p2pcam`'in yeniden okuduğu
+  ayarlar hemen, diğerleri yeniden başlatınca uygulanır. Flash'a hiçbir şey yazılmaz.
+- **Ses ayarları** (kamera kartında tıklayınca açılan bölüm): test sesli hoparlör düzeyi, sesli uyarıları açıp
+  kapama, mikrofon hassasiyeti, tarayıcıda **canlı dinleme** (kameranın mikrofonu, yaklaşık bir saniye gecikmeli)
+  ve kameranın hoparlörüne **ses dosyası gönderme** (en çok 30 sn; Android'de dosya seçici kayıt da yapabilir).
+  Tarayıcı mikrofonuyla canlı konuşma HTTPS ister: tarayıcılar düz HTTP sayfalarında mikrofonu kapalı tutar.
 - **Hareket fotoğrafları** (`mo.sh`): her hareket klibi için bir fotoğraf, klibe bağlı.
 - **Düzeltmeler:** RTSP soket arabelleğinin yanlış sokete verilmesi, loş ışıkta kayıtların saniye
   atlaması, 554 portunun LAN'dan RTSP dışı komut kabul etmesi.
@@ -145,8 +149,8 @@ bir varsayılan ağ geçidinden (router) eşitler; bulut engeli açıkken ulaş�
 - Bu projenin üzerine kurulduğu ve ihtiyaç duyduğu [temel hack ve söküm](https://github.com/Jalecom/AJ_HC1703L_Teardown) için
   [@Jalecom](https://github.com/Jalecom) ve orada adı geçen katkıcılar.
 - Tarayıcıda oynatma için GPAC'ın mp4box.js 0.5.2 kütüphanesi (BSD 3-Clause) pakete dahildir.
-- `sdcard/clean/bin/mdcfg` ve `ptzpos`, `tools/mdcfg.c` ile `tools/ptzpos.c`'nin statik ARM derlemeleridir
-  (derleme komutu kaynakta).
+- `sdcard/clean/bin/mdcfg`, `ptzpos` ve `snd`; `tools/mdcfg.c`, `tools/ptzpos.c` ve `tools/snd.c`'nin statik ARM
+  derlemeleridir (derleme komutu kaynakta).
 - Bu depoda yalnız HC1703L Plus kodu vardır, MIT lisanslıdır ([LICENSE](LICENSE)). Temel hack pakete
   dahil değildir; kendi deposundan alınır.
 - Augentix ya da Tange ile bağlantısı yoktur. Üreticiye ait ikili dağıtılmaz. Kullanım sorumluluğu
