@@ -170,6 +170,30 @@ gelir.
 Seçili görüntü modu devParam + 0xfa baytındadır (0 otomatik, 1 gündüz, 2 gece). Panel bunu `mdcfg image` ile okur;
 çalışan mod tek başına Otomatik seçimini gösteremez.
 
+## Gece yeniden başlatma
+
+`FUN_00042030` 6 saniyede bir çalışır (ölçüldü: 32 262 saniyede 5363 tur). Şu koşulların hepsi tutarsa kamerayı
+yeniden başlatır:
+
+- `0x3a8fbc` sayacı `0x3390`'ı geçmiştir (13 200 tur, yaklaşık 22 saat).
+- `0x3a4bf8` sıfır değildir. Bu, hwcfg'deki `auto_reboot` alanıdır (+0x24c, varsayılan 1). Onu yalnız bu denetim
+  okur; donanım test kipi 0 yapar.
+- Yerel saat 2, 3 ya da 4'tür ve zaman `0x3a55a8`'den 0 ile 600 saniye sonrasındadır. Bu değer açılışta bir kez
+  rastgele seçilir (`rand() % 7200`, 02:00'den sonraki saniye).
+- Art arda beş denetimde (30 sn) süren bir olay yoktur (`0x3a84f0`).
+
+Sonra `/home/silent_reboot` dosyasını oluşturup `reboot -nf` çalıştırır. Sonraki açılışta `start.sh` bu dosyayı
+görünce PTZ öz denetimini atlar, bu yüzden görüş yerinden oynamaz. `0x39ded5` baytı `'0'` kalmalıdır: başka bir
+değer kamerayı 11 tur sonra yeniden başlatır.
+
+Koşullar ve `0x39ded5` kuralı ayrıştırılmış koddan çıkarıldı (statik). 6 saniyelik tur, `auto_reboot` = 1 ve seçilen
+saat çalışan süreçten okundu.
+
+`mdcfg reboot <pid> [0|1]`, `0x3a4bf8`'i okur ve yazar, `<açık> <02:00'den sonraki saniye>` yazdırır. Kameramızın
+açılış kaydında 3–8 Kasım arasında her gece bir yeniden başlatma var (02:07 ile 03:56 arası). 17:28'deki bir
+açılıştan sonraki gece, kamera yalnız 10 saattir açık olduğu için atlandı. Kapatmanın etkisi bellekte doğrulandı,
+henüz bütün bir gece boyunca denenmedi.
+
 ## Bulut uç noktaları
 
 `netguard.sh`, `/home/etc/resolv.conf` dosyasını (`/etc/resolv.conf` buraya bağlı, flash'ta) salt okunur bir RAM

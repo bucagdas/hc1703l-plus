@@ -9,6 +9,7 @@
 #   GET  webui?s=md                 motion settings (sensitivity, tracking, zones)
 #   POST webui?c=COMMAND            command; replies "OK [code args]" or "ERR code".
 #   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; sensitivity and tracking apply at once, zones at the next boot
+#   POST webui?c=nightly_on|nightly_off   nightly restart of the stock p2pcam: kept in clean/NOREBOOT, applied at once
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
 R=/tmp/mnt/mmc01/0
@@ -147,6 +148,22 @@ ptz_go(){
   [ -n "$p" ] || { echo "ERR empty"; return 1; }
   /tmp/ptzpos go ${p%,*} ${p#*,} && echo "OK" || echo "ERR ptz"
 }
+# Nightly restart of the stock p2pcam (02:00-04:00, after about 22 h of uptime). Off is kept as clean/NOREBOOT and
+# health.sh applies it on every patched boot. Off is applied at once only on the patched build too: a stock boot
+# keeps the restart, so the patched build comes back by itself the next night.
+nightly_set(){
+  [ -d $C ] || { echo "ERR no_sd"; return 1; }
+  if [ "$1" = 0 ]; then touch $C/NOREBOOT; else rm -f $C/NOREBOOT; fi
+  sync
+  [ -f $C/NOREBOOT ] && f=0 || f=1
+  [ "$f" = "$1" ] || { echo "ERR sd_write"; return 1; }
+  ok=
+  if [ "$1" = 1 ] || [ -f /tmp/p2pcam.clean.sqfs ]; then
+    pid=$(p2p_pid)
+    [ -n "$pid" ] && tool && /tmp/mdcfg reboot "$pid" "$1" >/dev/null 2>&1 && ok=1
+  fi
+  if [ -n "$ok" ]; then echo "OK nightly_live"; else echo "OK nightly_saved"; fi
+}
 md_read(){
   sens=1; if [ -f $C/md.conf ]; then cat $C/md.conf; else tool && /tmp/mdcfg show /home/devParam.dat; echo "sensitivity=1"; fi
 }
@@ -211,6 +228,8 @@ command(){
     md_save)      md_save; return ;;
     ptz_save)     ptz_save; return ;;
     ptz_go)       ptz_go; return ;;
+    nightly_on)   nightly_set 1; return ;;
+    nightly_off)  nightly_set 0; return ;;
     reboot) ready_for_reboot
             ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
             echo "OK rebooting"; return ;;
@@ -231,7 +250,13 @@ status(){
   a=$(gio -g 77 2>/dev/null | awk '/gio.value/{print $3}'); [ "$a" = 0 ] && echo "ir=1" || echo "ir=0"
   if ptz_tool; then echo "ptz=$(/tmp/ptzpos get 2>/dev/null)"; [ -f $C/ptz.conf ] && sed 's/^/preset/' $C/ptz.conf; fi
   # mode is what the camera runs now; image is what was selected (0 auto, 1 day, 2 night)
-  pid=$(p2p_pid); [ -n "$pid" ] && tool && echo "image=$(/tmp/mdcfg image "$pid" 2>/dev/null)"
+  pid=$(p2p_pid)
+  if [ -n "$pid" ] && tool; then
+    echo "image=$(/tmp/mdcfg image "$pid" 2>/dev/null)"
+    # nightly restart now: "<on> <seconds after 02:00>"; nightly_cfg is the saved choice
+    echo "nightly=$(/tmp/mdcfg reboot "$pid" 2>/dev/null)"
+  fi
+  if [ -d $C ]; then [ -f $C/NOREBOOT ] && echo "nightly_cfg=0" || echo "nightly_cfg=1"; fi
   echo "sharpness=$(shp_read /tmp/sensor_day.ini)"
   awk '/^MemAvailable/{print "mem_kb=" $2}' /proc/meminfo
   top -b -n 1 2>/dev/null | awk '/^CPU:/{for(i=1;i<=NF;i++) if($(i+1)=="idle"){v=$i; sub(/%/,"",v); print "cpu=" 100-v; exit}}'
@@ -459,6 +484,13 @@ footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
         <button type="button" data-c="next_patched" data-name="next_patched" data-confirm="c_patched" data-i18n="use_patched">Patched build</button>
         <button type="button" data-c="next_stock" data-name="next_stock" data-confirm="c_stock" data-i18n="use_stock">Stock firmware</button>
       </div>
+      <h3 data-i18n="nightly_title">Nightly restart</h3>
+      <div class="row">
+        <button type="button" data-nightly="1" data-i18n="on">On</button>
+        <button type="button" data-nightly="0" data-i18n="off">Off</button>
+      </div>
+      <p class="note" data-i18n="nightly_note">The stock firmware restarts the camera once a night, at a random time between 02:00 and 04:00.</p>
+      <p class="note" id="nightly_wait" data-i18n="nightly_wait" hidden></p>
       <pre id="logs" hidden></pre>
     </section>
     <section class="card wide">
@@ -510,7 +542,10 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
  v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
  m_auto:'Auto ({0})',m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
- v_sd:'{0} used of {1} ({2}%)',v_cpu:'{0}% in use',v_persistent:'Persistent (/bak)',d:'d',h:'h',min:'min'},
+ v_sd:'{0} used of {1} ({2}%)',v_cpu:'{0}% in use',v_persistent:'Persistent (/bak)',d:'d',h:'h',min:'min',
+ nightly_title:'Nightly restart',nightly_note:'The stock firmware restarts the camera once a night, at a random time between 02:00 and 04:00. It does so only after about 22 hours of uptime and when nothing is being recorded. The restart takes about a minute and clears problems that build up when the camera runs for days. When it is off, the camera runs until you restart it. A stock boot always keeps it on, so the patched build comes back by itself.',
+ nightly_wait:'Off is saved. This boot runs the stock firmware, so the restart stays on until the next patched boot.',nightly_live:'saved and applied',nightly_saved:'saved, applies on the next patched boot',
+ k_nightly:'Nightly restart',v_nightly_on:'On, next around {0}',v_nightly_off:'Off'},
 tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera önizlemesi',connecting:'Bağlanıyor…',pv_stop:'Önizlemeyi durdur',pv_start:'Önizlemeyi başlat',
  pv_note:'Saniyede yaklaşık 1 kare, 640×360. Tam kalite için RTSP adresini kullanın.',pv_live:'Canlı',pv_fail:'Görüntü alınamadı, yeniden deneniyor…',pv_stopped:'Durduruldu',
  ptz_label:'Kamera yönü',t_step:'Kısa bir adım',t_hold:'Basılı tutun',ptz_note:'Oklar basılı tutulduğu sürece döner; köşeler kısa bir adım atar.',
@@ -530,7 +565,10 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
  v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
  m_auto:'Otomatik ({0})',m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
- v_sd:'{0} dolu / {1} (%{2})',v_cpu:'%{0} kullanımda',v_persistent:'Kalıcı (/bak)',d:'gün',h:'sa',min:'dk'}};
+ v_sd:'{0} dolu / {1} (%{2})',v_cpu:'%{0} kullanımda',v_persistent:'Kalıcı (/bak)',d:'gün',h:'sa',min:'dk',
+ nightly_title:'Gece yeniden başlatma',nightly_note:'Stok yazılım kamerayı her gece bir kez, 02:00 ile 04:00 arasında rastgele bir saatte yeniden başlatır. Bunu yalnız kamera yaklaşık 22 saattir açıksa ve o sırada kayıt yapılmıyorsa yapar. Yeniden başlatma yaklaşık bir dakika sürer ve kamera günlerce açık kaldığında biriken sorunları temizler. Kapalıyken kamera siz yeniden başlatana kadar çalışır. Stok açılışta bu ayar hep açık kalır, böylece yamalı sürüm kendiliğinden geri gelir.',
+ nightly_wait:'Kapalı ayarı kaydedildi. Bu açılış stok yazılımla yapıldığı için yeniden başlatma, sonraki yamalı açılışa kadar açık kalır.',nightly_live:'kaydedildi ve uygulandı',nightly_saved:'kaydedildi, sonraki yamalı açılışta uygulanır',
+ k_nightly:'Gece yeniden başlatma',v_nightly_on:'Açık, sıradaki yaklaşık {0}',v_nightly_off:'Kapalı'}};
 var lang='en';
 try{var q=new URLSearchParams(location.search).get('lang');if(q==='tr'||q==='en'){localStorage.setItem('hc_lang',q)}lang=localStorage.getItem('hc_lang')||'en'}catch(e){}
 if(!L[lang])lang='en';
@@ -581,6 +619,12 @@ document.querySelectorAll('button[data-toggle]').forEach(function(b){b.onclick=f
   send(k+(lit[k]?'_off':'_on')).then(function(r){var x=reply(r);msg(name+': '+x[0],x[1]);status()},function(){msg(t('neterr',name),'bad')});
 }});
 
+document.querySelectorAll('button[data-nightly]').forEach(function(b){b.onclick=function(){
+  var name=t('nightly_title');
+  msg(t('sending',name));
+  send(b.dataset.nightly==='1'?'nightly_on':'nightly_off').then(function(r){var x=reply(r);msg(name+': '+x[0],x[1]);status()},function(){msg(t('neterr',name),'bad')});
+}});
+
 // Saved positions. "Save here" arms the next number press.
 var saving=false,lastV={};
 function presetUi(v){
@@ -629,10 +673,19 @@ $('#ptoggle').onclick=function(){open=!open;this.textContent=t(open?'pv_stop':'p
 // Status
 var last=null;
 function modeName(v){var m=t('m_'+(v.mode||'unknown'));return v.image==='0'?t('m_auto',m):m}
-var ORDER=['build','next','mode','sharpness','cloud','recorder','lastmotion','sd','wifi','mem','cpu','uptime','time','hack','bootlog'];
+// Next nightly restart on the camera clock: 02:00 + at seconds, on the first night with about 22 h of uptime.
+function nextNightly(v,at){
+  var m=/^(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)$/.exec(v.time||'');if(!m||!v.uptime)return null;
+  var now=new Date(+m[1],m[2]-1,+m[3],+m[4],+m[5],+m[6]),d=new Date(+m[1],m[2]-1,+m[3],2,0,at);
+  if(d<=now)d.setDate(d.getDate()+1);
+  while(+v.uptime+(d-now)/1000<79200)d.setDate(d.getDate()+1);
+  return d.toLocaleString(lang==='tr'?'tr-TR':'en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+}
+var ORDER=['build','next','mode','sharpness','cloud','recorder','lastmotion','sd','wifi','mem','cpu','uptime','nightly','time','hack','bootlog'];
 function gb(kb){return (kb/1048576).toFixed(2).replace('.',lang==='tr'?',':'.')+' GB'}
 function render(v){
   var dl=$('#status');dl.textContent='';
+  var nl=(v.nightly||'').split(' ');if(nl.length<2)nl=null;
   function add(k,val,cls){var dt=document.createElement('dt');dt.textContent=t('k_'+k);var dd=document.createElement('dd');dd.textContent=val;if(cls)dd.className=cls;dl.appendChild(dt);dl.appendChild(dd)}
   ORDER.forEach(function(k){
     switch(k){
@@ -648,6 +701,7 @@ function render(v){
     case 'mem':if(v.mem_kb)add(k,(v.mem_kb/1024).toFixed(1).replace('.',lang==='tr'?',':'.')+' MB');break;
     case 'cpu':if(v.cpu)add(k,t('v_cpu',v.cpu));break;
     case 'uptime':if(v.uptime){var u=+v.uptime,dd=Math.floor(u/86400),hh=Math.floor(u%86400/3600),mm=Math.floor(u%3600/60);add(k,(dd?dd+' '+t('d')+' ':'')+hh+' '+t('h')+' '+mm+' '+t('min'))}break;
+    case 'nightly':if(nl){if(nl[0]==='0')add(k,t('v_nightly_off'));else{var nx=nextNightly(v,+nl[1]);add(k,nx?t('v_nightly_on',nx):t('on'))}}break;
     case 'time':if(v.time)add(k,v.time);break;
     case 'hack':if(v.hack)add(k,t('v_persistent'));break;
     case 'bootlog':if(v.bootlog)add(k,v.bootlog);break;
@@ -656,6 +710,10 @@ function render(v){
   document.querySelectorAll('button[data-k]').forEach(function(b){b.classList.toggle('on',b.dataset.k===v.sharpness)});
   ['wl','ir'].forEach(function(k){if(k in v){lit[k]=v[k]==='1';var b=$('#'+k);b.classList.toggle('on',lit[k]);b.setAttribute('aria-pressed',lit[k]?'true':'false')}});
   presetUi(v);
+  // Buttons show the saved choice; the note explains a stock boot that still restarts.
+  var nc=v.nightly_cfg||(nl&&nl[0]);
+  document.querySelectorAll('button[data-nightly]').forEach(function(b){b.classList.toggle('on',b.dataset.nightly===nc)});
+  $('#nightly_wait').hidden=!(nc==='0'&&nl&&nl[0]==='1');
   var picked={'0':'auto','1':'day','2':'night'}[v.image]||v.mode;
   document.querySelectorAll('button[data-mode]').forEach(function(b){b.classList.toggle('on',b.dataset.mode===picked)});
   $('#badge').textContent=(v.build==='patched'?t('v_next_patched'):(lang==='tr'?'Stok':'Stock'))+' · '+modeName(v)+' · '+(v.time||'');

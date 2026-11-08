@@ -7,6 +7,7 @@
  *   mdcfg apply <devParam.dat> <out> <md.conf>     exit 0 on success, the output has a valid checksum
  *   mdcfg live  <p2pcam pid> <md.conf>             apply sensitivity and tracking to the running p2pcam, RAM only
  *   mdcfg image <p2pcam pid>                       print the selected image mode: 0 auto, 1 day, 2 night
+ *   mdcfg reboot <p2pcam pid> [0|1]                nightly restart: optionally set it, then print "<on> <time>"
  *   mdcfg show  <devParam.dat>                     print the motion fields (never the Wi-Fi credentials)
  *
  * md.conf lines (unknown keys are ignored):
@@ -39,6 +40,12 @@
 #define VA_SIG    0x22a484u  /* "support_ymv" in the read-only data */
 #define VA_DEVPTR 0x39ddc0u  /* pointer to the RAM copy of devParam.dat, same layout as the file */
 #define VA_THRESH 0x3f1b0cu  /* moving blocks needed for an event */
+/* Nightly restart (stock FUN_00042030, checked every 6 s): after about 22 h of uptime, between 02:00 and 04:00
+ * local time, once 30 s pass with no recording. VA_AUTOREBOOT is the hwcfg "auto_reboot" field (default 1), read on
+ * every check and nowhere else. VA_REBOOT_AT is the chosen time in seconds after 02:00, picked at random once at
+ * start-up (0..7199). */
+#define VA_AUTOREBOOT 0x3a4bf8u
+#define VA_REBOOT_AT  0x3a55a8u
 
 static uint8_t b[FILE_SIZE];
 
@@ -153,6 +160,20 @@ static int image(int pid)
     return 0;
 }
 
+/* Prints "<on> <seconds after 02:00>". With set >= 0 it writes the switch first, but only if both values look sane. */
+static int reboot_cfg(int pid, int set)
+{
+    uint32_t dev = 0, on = 0, at = 0;
+    int fd = open_mem(pid, set < 0 ? O_RDONLY : O_RDWR, &dev);
+    if (fd < 0) return 1;
+    int ok = pread(fd, &on, 4, VA_AUTOREBOOT) == 4 && pread(fd, &at, 4, VA_REBOOT_AT) == 4 && on <= 1 && at < 7200;
+    if (ok && set >= 0) ok = mem_put(fd, VA_AUTOREBOOT, set) == 0 && pread(fd, &on, 4, VA_AUTOREBOOT) == 4 && on == (uint32_t)set;
+    close(fd);
+    if (!ok) { fprintf(stderr, "mdcfg: nightly restart not readable or not written\n"); return 1; }
+    printf("%u %u\n", on, at);
+    return 0;
+}
+
 /* Sensitivity and tracking only: p2pcam reads both from memory every time. Zones are left out on purpose:
  * zones written to memory were not picked up during motion, so they stay boot-only.
  * Everything is checked before the first write. */
@@ -203,6 +224,10 @@ int main(int argc, char **argv)
     if (argc == 3 && !strcmp(argv[1], "show")) return show(argv[2]);
     if (argc == 4 && !strcmp(argv[1], "live")) return live(atoi(argv[2]), argv[3]);
     if (argc == 3 && !strcmp(argv[1], "image")) return image(atoi(argv[2]));
-    fprintf(stderr, "usage: mdcfg apply <in> <out> <conf> | mdcfg live <pid> <conf> | mdcfg image <pid> | mdcfg show <in>\n");
+    if (argc == 3 && !strcmp(argv[1], "reboot")) return reboot_cfg(atoi(argv[2]), -1);
+    if (argc == 4 && !strcmp(argv[1], "reboot") && (!strcmp(argv[3], "0") || !strcmp(argv[3], "1")))
+        return reboot_cfg(atoi(argv[2]), argv[3][0] - '0');
+    fprintf(stderr, "usage: mdcfg apply <in> <out> <conf> | mdcfg live <pid> <conf> | mdcfg image <pid> |"
+                    " mdcfg reboot <pid> [0|1] | mdcfg show <in>\n");
     return 2;
 }

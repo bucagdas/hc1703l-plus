@@ -25,7 +25,8 @@ Ayrıca:
 - **Kontrol paneli** (`:8080`): canlı önizleme, basılı tutunca dönen PTZ, dört kayıtlı kamera konumu, tek
   düğmeyle beyaz ışık ve IR, gündüz / gece / otomatik (yalnız çalışan modu değil seçimi de gösterir), keskinlik
   hazır ayarları, durum (yamalı mı stok mu, bulut engeli, WiFi, SD,
-  RAM, CPU, son hareket), günlükler. Komutlar yalnız POST ile gider: sayfayı yenilemek ya da geri yüklenen
+  RAM, CPU, son hareket), günlükler ve stok yazılımın gece yeniden başlatması için bir anahtar (aşağıya bakın).
+  Komutlar yalnız POST ile gider: sayfayı yenilemek ya da geri yüklenen
   sekme komutu tekrar çalıştırmaz. İngilizce ve Türkçe (başlıktaki EN/TR anahtarı; galeri
   panelin seçimini izler).
 - **Kayıt galerisi** (`:8090`): hareket olayları kart olarak (fotoğraf + klip), gün görünümü, tarayıcıda
@@ -87,6 +88,14 @@ değiştirmek kamerayı stoğa düşürmez.
 6. Yükleyiciyi kurun: `cp /tmp/mnt/mmc01/0/clean/debug_cmd.sh /tmp/mnt/mmc01/0/; sync; reboot`
 7. Yaklaşık bir dakika sonra paneldeki durum **Yamalı** göstermeli, RTSP akışı
    (`rtsp://<kamera>:554/0/av0`) 1280×720 olmalı.
+
+## Gece yeniden başlatma
+
+Kamerayı her gece bir kez stok `p2pcam`'in kendisi yeniden başlatır; bunun sebebi ne temel hack ne de Plus'tır. Bunu 02:00 ile 04:00 arasında
+rastgele bir saatte (kamera saatiyle) yapar. Kameranın yaklaşık 22 saattir açık olması ve o sırada kayıt
+yapılmıyor olması gerekir. Varsayılan olarak açıktır. Paneldeki Bakım kartında **Kapalı** seçilince
+`clean/NOREBOOT` yazılır. Ayar hemen ve her yamalı açılışta yeniden uygulanır. Stok açılışta yeniden başlatma hep
+açık kalır; böylece stoğa düşen bir kamera ertesi gece yamalı sürüme geri döner. Flash'a hiçbir şey yazılmaz.
 
 ## Kurtarma
 

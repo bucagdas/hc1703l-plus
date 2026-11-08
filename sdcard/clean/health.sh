@@ -62,6 +62,19 @@ temizle(){
   fi
 }
 
+# The stock p2pcam restarts the camera once a night (02:00-04:00, after about 22 h of uptime). clean/NOREBOOT
+# turns that off, but only on a patched boot: a stock boot keeps it, so the patched build comes back the next night.
+nightly(){
+  [ -f $C/NOREBOOT ] || return 0
+  [ -x /tmp/mdcfg ] || { cp $C/bin/mdcfg /tmp/mdcfg && chmod 755 /tmp/mdcfg; }
+  pid=$(ps | awk '/\/p2pcam\/p2pcam/ && !/awk/{print $1; exit}')
+  if [ -n "$pid" ] && /tmp/mdcfg reboot "$pid" 0 >/dev/null 2>&1; then
+    log "nightly restart off (clean/NOREBOOT)"
+  else
+    log "WARNING: nightly restart could not be turned off"
+  fi
+}
+
 denetle(){
   set -- $(md5sum /p2pcam/p2pcam 2>/dev/null)
   got=$1
@@ -101,6 +114,7 @@ if [ "$got" = "$want" ]; then
   else
     arm && log "patched healthy, loader armed"
   fi
+  nightly
   sleep $((STABLE-ARM))
   denetle
   if [ "$got" = "$want" ] && [ $ok = 1 ]; then

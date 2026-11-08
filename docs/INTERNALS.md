@@ -170,6 +170,28 @@ the other side.
 The selected image mode is the byte at devParam + 0xfa (0 auto, 1 day, 2 night), and p2pcam keeps it in the file.
 The panel reads it with `mdcfg image`; the running mode alone cannot show Auto.
 
+## Nightly restart
+
+`FUN_00042030` runs every 6 s (measured: 5363 ticks in 32 262 s). It restarts the camera when all of these hold:
+
+- the tick counter `0x3a8fbc` is above `0x3390` (13 200 ticks, about 22 h);
+- `0x3a4bf8` is non-zero. This is the hwcfg field `auto_reboot` (+0x24c, default 1). Only this check reads it;
+  the hardware-test mode sets it to 0;
+- the local hour is 2, 3 or 4, and the time is 0 to 600 s past `0x3a55a8`. That value is picked at random once
+  at start-up (`rand() % 7200`, seconds after 02:00);
+- five checks in a row (30 s) see no running event (`0x3a84f0`).
+
+It then creates `/home/silent_reboot` and runs `reboot -nf`. On the next boot `start.sh` sees that file and skips
+the PTZ self-check, so the view does not move. The byte `0x39ded5` must stay `'0'`: any other value restarts
+the camera after 11 ticks.
+
+The conditions and the `0x39ded5` rule come from the decompile (static). The 6 s tick, `auto_reboot` = 1 and the
+chosen time were read from the running process.
+
+`mdcfg reboot <pid> [0|1]` reads and writes `0x3a4bf8` and prints `<on> <seconds after 02:00>`. Our camera's boot
+log shows one restart every night between 3 and 8 November (02:07 to 03:56). The night after a 17:28 boot was
+skipped, with only 10 h of uptime. Turning it off was checked in memory, not yet through a whole night.
+
 ## Cloud endpoints
 
 `netguard.sh` covers `/home/etc/resolv.conf` (the target of `/etc/resolv.conf`, on flash) with a read-only RAM

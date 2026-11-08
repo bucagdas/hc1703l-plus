@@ -23,7 +23,8 @@ patched from **your own** copy of the firmware, and everything you interact with
 Plus also adds:
 
 - **Control panel** on `:8080`: live preview, press-and-hold PTZ, four saved camera positions, one-button
-  white light and IR, day / night / auto (showing what is selected, not only what runs), sharpness presets, status (patched or stock, cloud block, Wi-Fi, SD, RAM, CPU, last motion), logs.
+  white light and IR, day / night / auto (showing what is selected, not only what runs), sharpness presets, status (patched or stock, cloud block, Wi-Fi, SD, RAM, CPU, last motion), logs,
+  and a switch for the stock firmware's nightly restart (see below).
   Commands are POST-only, so reloading the page or restoring a tab never re-runs a command. English and
   Turkish (EN/TR switch in the header; the gallery follows the panel's choice).
 - **Recordings gallery** on `:8090`: motion events as cards (snapshot + clip), per-day view, in-browser
@@ -83,6 +84,14 @@ in a row do not drop the camera to stock.
 6. Arm the loader: `cp /tmp/mnt/mmc01/0/clean/debug_cmd.sh /tmp/mnt/mmc01/0/; sync; reboot`
 7. After about a minute the panel's status should read **Patched**, and the RTSP stream
    (`rtsp://<camera>:554/0/av0`) should be 1280×720.
+
+## Nightly restart
+
+The stock `p2pcam` itself restarts the camera once a night; neither the base hack nor Plus causes it. It does this at a random time
+between 02:00 and 04:00 (camera clock), and only after about 22 hours of uptime and when nothing is being recorded.
+It is on by default. **Off** in the panel's Maintenance card writes `clean/NOREBOOT`; the setting is applied at
+once and again on every patched boot. A stock boot always keeps the restart on, so a camera that fell back to stock
+gets the patched build back the next night. Nothing is written to flash.
 
 ## Recovery
 
