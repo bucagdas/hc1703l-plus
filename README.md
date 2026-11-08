@@ -35,7 +35,7 @@ Plus also adds:
   not touch flash either.
 - **Camera settings** in the panel: night picture (infrared or colour), when to switch to night and back to day,
   the hourly day check, person detection threshold, SD recording (motion events, continuous or off), speaker
-  volume, voice prompts, time stamp corner and a 180° turn. Kept in `clean/cam.conf`; what `p2pcam` re-reads
+  volume, time stamp corner and a 180° turn. Kept in `clean/cam.conf`; what `p2pcam` re-reads
   applies at once, the rest after a reboot. Nothing goes to flash.
 - **Motion snapshots** (`mo.sh`): one snapshot per motion clip, linked to it.
 - **Fixes:** RTSP socket buffer on the wrong socket, recordings skipping seconds in dim light, vendor

@@ -37,7 +37,7 @@ Ayrıca:
   flash'a dokunmaz.
 - **Kamera ayarları** panelde: gece görüntüsü (kızılötesi ya da renkli), geceye geçiş ve gündüze dönüş
   zamanı, saat başı gündüz denemesi, kişi algılama eşiği, SD kayıt (hareket olayları, sürekli ya da kapalı),
-  hoparlör sesi, sesli uyarılar, saat damgasının köşesi ve 180° çevirme. `clean/cam.conf` içinde saklanır;
+  hoparlör sesi, saat damgasının köşesi ve 180° çevirme. `clean/cam.conf` içinde saklanır;
   `p2pcam`'in yeniden okuduğu ayarlar hemen, diğerleri yeniden başlatınca uygulanır. Flash'a hiçbir şey yazılmaz.
 - **Hareket fotoğrafları** (`mo.sh`): her hareket klibi için bir fotoğraf, klibe bağlı.
 - **Düzeltmeler:** RTSP soket arabelleğinin yanlış sokete verilmesi, loş ışıkta kayıtların saniye

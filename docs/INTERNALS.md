@@ -210,7 +210,6 @@ person threshold from `motion_level` at start-up. The panel uses `mdcfg live` an
 | `person` | float `0x3a1418` | yes | stock sets 0.7 / 0.4 / 0.1 from `motion_level` 0 / 1 / 2 |
 | `recmode` | devParam `0x2c4` | 0↔1 | 2 = continuous + events, set up at start-up. Continuous segments are named `*.mp4`, event clips `*M.mp4` |
 | `volume` | devParam `0x3bc` (×10) | yes | read on every playback |
-| `voice` | empty RAM file over `/bak/VOICE.tgz` | yes | `start.sh` unpacks it into `/tmp/VOICE` after `debug_cmd.sh` |
 | `nightcolor` | devParam `0x2cc` | boot | 0 IR, 1 colour with the white light boosted on motion, 2 colour |
 | `osd` | hwcfg `osdtime_pos` → `0x39ff78` | boot | −1 off, 0 top left, 1 top right, 2 bottom left, 3 bottom right (verified: 3) |
 | `rotate` | devParam `0xfc` = 3 | boot | 180° (verified). `p2pcam` compensates its own PTZ moves; the panel swaps its arrows |

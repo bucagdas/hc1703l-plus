@@ -213,7 +213,6 @@ kullanır.
 | `person` | float `0x3a1418` | evet | stok, `motion_level` 0 / 1 / 2 için 0,7 / 0,4 / 0,1 kullanır |
 | `recmode` | devParam `0x2c4` | 0↔1 | 2 = sürekli + olay, açılışta kurulur. Sürekli kayıt parçaları `*.mp4`, olay klipleri `*M.mp4` adını alır |
 | `volume` | devParam `0x3bc` (×10) | evet | her çalmada okunur |
-| `voice` | `/bak/VOICE.tgz` üzerine boş bir RAM dosyası | evet | `start.sh`, `debug_cmd.sh`'den sonra onu `/tmp/VOICE` içine açar |
 | `nightcolor` | devParam `0x2cc` | açılış | 0 kızılötesi, 1 renkli ve harekette beyaz ışık güçlenir, 2 renkli |
 | `osd` | hwcfg `osdtime_pos` → `0x39ff78` | açılış | −1 kapalı, 0 sol üst, 1 sağ üst, 2 sol alt, 3 sağ alt (doğrulandı: 3) |
 | `rotate` | devParam `0xfc` = 3 | açılış | 180° (doğrulandı). `p2pcam` kendi PTZ hareketlerini düzeltir; panel oklarını yer değiştirir |

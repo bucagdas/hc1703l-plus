@@ -11,7 +11,7 @@
 #   POST webui?c=md_save&v=s1.t0.z0-0-3-10_6-2-3-4   save clean/md.conf; sensitivity and tracking apply at once, zones at the next boot
 #   POST webui?c=nightly_on|nightly_off   nightly restart of the stock p2pcam: kept in clean/NOREBOOT, applied at once
 #   GET  webui?s=cam                camera settings: saved (clean/cam.conf) and running ("now_" prefix)
-#   POST webui?c=cam_save&v=n200.d3300.h1.p0.r1.v6.s1.c0.o1.t0   save clean/cam.conf; live where possible
+#   POST webui?c=cam_save&v=n200.d3300.h1.p0.r1.v6.c0.o1.t0   save clean/cam.conf; live where possible
 #   POST webui?c=day_retest          let auto mode re-check daylight now (/tmp/forceday)
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
@@ -173,7 +173,6 @@ kv(){ awk -F= -v k="$1" '$1==k{v=$2} END{print v}' "$2" 2>/dev/null; }
 cam_read(){
   pid=$(p2p_pid)
   [ -n "$pid" ] && tool && /tmp/mdcfg state "$pid" 2>/dev/null | sed 's/^/now_/'
-  ls /tmp/VOICE/*.wav >/dev/null 2>&1 && echo "now_voice=1" || echo "now_voice=0"
   [ -f $C/cam.conf ] && cat $C/cam.conf
 }
 cam_save(){
@@ -189,7 +188,6 @@ cam_save(){
       p0|p10|p40|p70) echo "person=${p#p}" ;;
       r[012]) echo "recmode=${p#r}" ;;
       v[1-9]|v10) echo "volume=${p#v}" ;;
-      s[01]) echo "voice=${p#s}" ;;
       c[012]) echo "nightcolor=${p#c}" ;;
       o-1|o[0-3]) echo "osd=${p#o}" ;;
       t[01]) echo "rotate=${p#t}" ;;
@@ -205,12 +203,6 @@ cam_save(){
   if [ -f /tmp/p2pcam.clean.sqfs ] && [ -n "$pid" ] && [ "$(md /proc/$pid/exe)" = "$(cat $C/p2pcam.md5 2>/dev/null)" ]; then
     cat $C/md.conf $C/cam.conf > /tmp/plus.live 2>/dev/null
     /tmp/mdcfg live "$pid" /tmp/plus.live >/dev/null 2>&1 && ok=1
-    if [ "$(kv voice $C/cam.conf)" = 0 ]; then
-      rm -f /tmp/VOICE/*.wav
-    elif ! ls /tmp/VOICE/*.wav >/dev/null 2>&1; then
-      grep -q ' /bak/VOICE.tgz ' /proc/mounts && umount /bak/VOICE.tgz
-      tar -xf /bak/VOICE.tgz -C /tmp >/dev/null 2>&1 || ok=0
-    fi
     # Anything p2pcam does not take live (or did not take) needs a boot.
     /tmp/mdcfg state "$pid" > /tmp/cam.now 2>/dev/null || ok=0
     for k in night day recmode volume nightcolor rotate osd; do
@@ -382,18 +374,17 @@ cat <<'EOT'
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HC1703L Plus</title>
 <style>
-:root{--bg:#f3f4f6;--card:#fff;--fg:#1d2330;--muted:#667085;--line:#e2e5ea;--accent:#2563eb;--good:#15803d;--bad:#b91c1c}
-@media (prefers-color-scheme:dark){:root{--bg:#101317;--card:#1a1f26;--fg:#e6e9ee;--muted:#97a1af;--line:#2b323c;--accent:#5b9cf6;--good:#4ade80;--bad:#f87171}}
+:root{--bg:#f3f4f6;--card:#fff;--fg:#1d2330;--lab:#344054;--muted:#667085;--muted2:#475467;--line:#e2e5ea;--line2:#eef0f3;--track:#eef1f5;--pill:#fff;--btnline:#d0d5dd;--foot:#fafbfc;--accent:#2563eb;--good:#15803d;--bad:#b91c1c;--shadow:0 1px 2px rgba(16,24,40,.14),0 0 0 1px rgba(16,24,40,.06)}
+@media (prefers-color-scheme:dark){:root{--bg:#101317;--card:#1a1f26;--fg:#e6e9ee;--lab:#c9d1db;--muted:#97a1af;--muted2:#b3bcc8;--line:#2b323c;--line2:#232a33;--track:#11151a;--pill:#323b47;--btnline:#3a424e;--foot:#161b21;--accent:#5b9cf6;--good:#4ade80;--bad:#f87171;--shadow:0 1px 2px rgba(0,0,0,.5)}}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+body>header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
 h1{font-size:17px;margin:0}
 #badge{font-size:13px;color:var(--muted)}
 .right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 #msg{font-size:13px;min-height:18px;max-width:100%;overflow-wrap:anywhere}
 #msg.good{color:var(--good)} #msg.bad{color:var(--bad)}
-.lang button{min-height:30px;padding:3px 9px;font-size:12px}
 main{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:stretch}
 .bottom{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:stretch;min-width:0}
 .bottom .wide{grid-column:1/-1}
@@ -401,47 +392,79 @@ main{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-colu
 @media (max-width:780px){main{grid-template-columns:1fr;padding:12px}.bottom{grid-template-columns:minmax(0,1fr)}}
 .col{display:flex;flex-direction:column;gap:16px;min-width:0}
 .col>.card:last-child{flex:1}
-.card.live{display:flex;flex-direction:column}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
-h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
-h3{font-size:13px;font-weight:600;margin:16px 0 8px}
-h2+h3{margin-top:0}
-#preview{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:6px;object-fit:contain}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.ch{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:46px;padding:10px 20px;border-bottom:1px solid var(--line2)}
+h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0}
+h3{font-size:14px;font-weight:600;margin:0}
+.cb{padding:16px 20px 18px;display:flex;flex-direction:column;gap:16px;flex:1;min-width:0}
+.cf{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 20px;border-top:1px solid var(--line2);background:var(--foot)}
+.sum{font-size:13px;color:var(--muted)}
+.sum.dirty{color:var(--fg)}
+.legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.set{display:flex;flex-direction:column;gap:6px;min-width:0}
+.lab{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--lab)}
+.dot{display:none;width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.set.changed .dot{display:inline-block}
+.ico{width:13px;height:13px;flex:none;color:var(--muted)}
+.hint{margin:0;font-size:12px;line-height:1.4;color:var(--muted)}
+.line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+button{font:inherit;font-size:14px;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--btnline);background:var(--card);color:var(--fg);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:active,button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;padding:0 20px}
+button.primary:disabled{background:var(--line);border-color:var(--line);color:var(--muted);opacity:1}
+button.danger{color:var(--bad)}
+button.danger:active{color:#fff;background:var(--bad);border-color:var(--bad)}
+.seg{display:inline-flex;flex-wrap:wrap;gap:2px;padding:3px;background:var(--track);border-radius:10px;align-self:flex-start;max-width:100%}
+.seg button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:36px;min-width:40px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:var(--muted2);font-size:13px;font-weight:500}
+.seg button:hover{color:var(--fg)}
+.seg button.on,.seg button:active{background:var(--pill);color:var(--fg);font-weight:600;box-shadow:var(--shadow)}
+.seg svg{flex:none}
+.lang button{min-height:30px;min-width:34px;padding:0 9px;font-size:12px}
+button.sw{display:inline-flex;align-items:center;gap:10px;padding:0 14px 0 10px}
+.knob{position:relative;flex:none;width:34px;height:20px;border-radius:10px;background:var(--line);transition:background .15s}
+.knob::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s}
+button.sw.on,button.sw:active{background:var(--card);border-color:var(--btnline);color:var(--fg)}
+button.sw.on .knob{background:var(--accent)}
+button.sw.on .knob::after{left:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid3>.cb{border-right:1px solid var(--line2)}
+.grid3>.cb:last-child{border-right:0}
+@media (max-width:900px){.grid3{grid-template-columns:minmax(0,1fr)}.grid3>.cb{border-right:0;border-bottom:1px solid var(--line2)}.grid3>.cb:last-child{border-bottom:0}}
+@media (max-width:600px){.set .seg{display:flex;width:100%}.set .seg button{flex:1 1 0;min-height:44px;min-width:0;padding:0 6px}}
+#preview{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;object-fit:contain}
 #pvwrap{position:relative}
-#zonebox{position:absolute;inset:0;border-radius:6px;overflow:hidden;touch-action:none;cursor:crosshair;user-select:none;-webkit-user-select:none;background-image:linear-gradient(rgba(255,255,255,.28) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.28) 1px,transparent 1px);background-size:10% 10%}
+#zonebox{position:absolute;inset:0;border-radius:8px;overflow:hidden;touch-action:none;cursor:crosshair;user-select:none;-webkit-user-select:none;background-image:linear-gradient(rgba(255,255,255,.28) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.28) 1px,transparent 1px);background-size:10% 10%}
 #zonebox.view{pointer-events:none}
 .zone{position:absolute;background:rgba(37,99,235,.38);border:2px solid #93c5fd;box-sizing:border-box;cursor:pointer}
 .zone.draft{background:rgba(250,204,21,.35);border-color:#fde047;pointer-events:none}
-.under{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:var(--muted)}
-button{font:inherit;min-height:40px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
-button:hover{border-color:var(--accent)}
-button:active,button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-button.danger{color:var(--bad)}
-button.danger:active{color:#fff;background:var(--bad);border-color:var(--bad)}
-.row{display:flex;flex-wrap:wrap;gap:8px}
-.ptz-wrap{display:flex;justify-content:center;align-items:center;flex:1;margin-top:12px}
+.under{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.ptz-wrap{display:flex;justify-content:center;align-items:center;flex:1}
 .ptz{display:grid;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(3,50px);gap:6px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .ptz button{padding:0;font-size:20px;touch-action:none}
-.presets{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.presets .row{justify-content:center}
 .ptz span{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
-.note{font-size:12px;color:var(--muted);margin:6px 0 0}
-.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 20px}
-.cgrid h3{margin-top:10px}
-button:disabled{opacity:.45;cursor:default}
-dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0;font-size:14px}
-dt{color:var(--muted)}
+.presets{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:center}
+.presets .row{justify-content:center}
+.presets button[data-preset]{min-width:44px;padding:0}
+dl{display:grid;grid-template-columns:auto minmax(0,1fr);margin:0;font-size:14px}
+dt,dd{padding:7px 0;border-bottom:1px solid var(--line2)}
+dl>:nth-last-child(-n+2){border-bottom:0}
+dt{color:var(--muted);font-size:13px;padding-right:16px}
 dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 dd.good{color:var(--good)} dd.bad{color:var(--bad)}
-input[readonly]{font:12px ui-monospace,Menlo,monospace;width:100%;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
-.copy{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+input[readonly]{font:12px ui-monospace,Menlo,monospace;width:100%;min-width:0;min-height:40px;padding:0 10px;border:1px solid var(--btnline);border-radius:10px;background:var(--bg);color:var(--fg)}
+.copy{display:flex;flex-wrap:wrap;gap:8px}
 .copy input{flex:1 1 250px;min-width:0}
 a{color:var(--accent)}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;max-height:360px;overflow:auto;background:var(--bg);padding:10px;border-radius:6px;margin:10px 0 0}
+a.btnlink{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;min-height:40px;padding:0 14px;border:1px solid var(--btnline);border-radius:10px;color:var(--fg);text-decoration:none;font-size:14px}
+a.btnlink:hover{border-color:var(--accent)}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Menlo,monospace;max-height:360px;overflow:auto;background:var(--bg);padding:10px;border-radius:8px;margin:0}
 details>summary{cursor:pointer;font-weight:600}
 details .row{margin-top:10px}
 details button{font:12px ui-monospace,Menlo,monospace}
-footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:var(--muted)}
+body>footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -449,192 +472,272 @@ footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;color:v
   <div><h1>HC1703L Plus</h1><div id="badge" data-i18n="reading">Reading status…</div></div>
   <div class="right">
     <div id="msg" role="status" aria-live="polite"></div>
-    <div class="lang row" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button></div>
+    <div class="lang seg" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="tr">TR</button></div>
   </div>
 </header>
 <main>
   <div class="col">
     <section class="card live">
-      <h2 data-i18n="live">Live preview</h2>
-      <div id="pvwrap"><img id="preview" alt="" data-i18n-alt="preview_alt"><div id="zonebox" hidden></div></div>
-      <div class="under"><span id="pstate" data-i18n="connecting">Connecting…</span><span class="row"><button id="zgrid" type="button" hidden></button><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></span></div>
-      <p class="note" data-i18n="pv_note">About 1 frame per second, 640×360. Use the RTSP address for full quality.</p>
-      <div class="ptz-wrap">
-        <div class="ptz" data-i18n-label="ptz_label">
-          <button type="button" data-c="ptzlu" data-name="up_left" data-i18n-title="t_step">&#11017;</button>
-          <button type="button" data-hold="ptzu" data-i18n-title="t_hold">&#11014;</button>
-          <button type="button" data-c="ptzru" data-name="up_right" data-i18n-title="t_step">&#11016;</button>
-          <button type="button" data-hold="ptzl" data-i18n-title="t_hold">&#11013;</button>
-          <span>PTZ</span>
-          <button type="button" data-hold="ptzr" data-i18n-title="t_hold">&#10145;</button>
-          <button type="button" data-c="ptzld" data-name="down_left" data-i18n-title="t_step">&#11019;</button>
-          <button type="button" data-hold="ptzd" data-i18n-title="t_hold">&#11015;</button>
-          <button type="button" data-c="ptzrd" data-name="down_right" data-i18n-title="t_step">&#11018;</button>
+      <div class="ch"><h2 data-i18n="live">Live preview</h2><span class="legend" id="pstate" data-i18n="connecting">Connecting…</span></div>
+      <div class="cb">
+        <div id="pvwrap"><img id="preview" alt="" data-i18n-alt="preview_alt"><div id="zonebox" hidden></div></div>
+        <div class="under"><p class="hint" data-i18n="pv_note">About 1 frame per second, 640×360. Use the RTSP address for full quality.</p><span class="row"><button id="zgrid" type="button" hidden></button><button id="ptoggle" type="button" data-i18n="pv_stop">Stop preview</button></span></div>
+        <div class="ptz-wrap">
+          <div class="ptz" data-i18n-label="ptz_label">
+            <button type="button" data-c="ptzlu" data-name="up_left" data-i18n-title="t_step">&#11017;</button>
+            <button type="button" data-hold="ptzu" data-i18n-title="t_hold">&#11014;</button>
+            <button type="button" data-c="ptzru" data-name="up_right" data-i18n-title="t_step">&#11016;</button>
+            <button type="button" data-hold="ptzl" data-i18n-title="t_hold">&#11013;</button>
+            <span>PTZ</span>
+            <button type="button" data-hold="ptzr" data-i18n-title="t_hold">&#10145;</button>
+            <button type="button" data-c="ptzld" data-name="down_left" data-i18n-title="t_step">&#11019;</button>
+            <button type="button" data-hold="ptzd" data-i18n-title="t_hold">&#11015;</button>
+            <button type="button" data-c="ptzrd" data-name="down_right" data-i18n-title="t_step">&#11018;</button>
+          </div>
+        </div>
+        <div class="presets">
+          <span id="ptzat"></span>
+          <div class="row">
+            <button type="button" data-preset="1">1</button>
+            <button type="button" data-preset="2">2</button>
+            <button type="button" data-preset="3">3</button>
+            <button type="button" data-preset="4">4</button>
+            <button type="button" id="psave" data-i18n="p_save">Save here</button>
+          </div>
+          <p class="hint" data-i18n="ptz_note">Arrows move while held; corners take one short step.</p>
         </div>
       </div>
-      <div class="presets">
-        <span id="ptzat"></span>
-        <div class="row">
-          <button type="button" data-preset="1">1</button>
-          <button type="button" data-preset="2">2</button>
-          <button type="button" data-preset="3">3</button>
-          <button type="button" data-preset="4">4</button>
-          <button type="button" id="psave" data-i18n="p_save">Save here</button>
-        </div>
-      </div>
-      <p class="note" style="text-align:center" data-i18n="ptz_note">Arrows move while held; corners take one short step.</p>
     </section>
   </div>
   <div class="col">
     <section class="card">
-      <h2 data-i18n="controls">Controls</h2>
-      <h3 data-i18n="image_mode">Image mode</h3>
-      <div class="row">
-        <button type="button" data-c="day" data-mode="day" data-name="day" data-i18n="day">Day</button>
-        <button type="button" data-c="night" data-mode="night" data-name="night" data-i18n="night">Night</button>
-        <button type="button" data-c="auto" data-mode="auto" data-name="auto" data-i18n="auto">Auto</button>
+      <div class="ch"><h2 data-i18n="controls">Controls</h2></div>
+      <div class="cb">
+        <div class="set">
+          <div class="lab" data-i18n="image_mode">Image mode</div>
+          <div class="seg" role="group" data-i18n-label="image_mode">
+            <button type="button" data-c="day" data-mode="day" data-name="day" data-i18n="day">Day</button>
+            <button type="button" data-c="night" data-mode="night" data-name="night" data-i18n="night">Night</button>
+            <button type="button" data-c="auto" data-mode="auto" data-name="auto" data-i18n="auto">Auto</button>
+          </div>
+        </div>
+        <div class="set">
+          <div class="lab" data-i18n="lights">Lights</div>
+          <div class="row">
+            <button type="button" class="sw" id="wl" data-toggle="wl" role="switch" aria-checked="false"><span class="knob" aria-hidden="true"></span><span data-i18n="wl">White light</span></button>
+            <button type="button" class="sw" id="ir" data-toggle="ir" role="switch" aria-checked="false"><span class="knob" aria-hidden="true"></span><span data-i18n="ir">IR light</span></button>
+          </div>
+        </div>
+        <div class="set">
+          <div class="lab" data-i18n="sharp_title">Sharpness (day)</div>
+          <div class="seg" role="group" data-i18n-label="sharp_title">
+            <button type="button" data-c="sharp125" data-k="125" data-name="sharp" data-i18n="sharp125">125 · soft</button>
+            <button type="button" data-c="sharp140" data-k="140" data-name="sharp" data-i18n="sharp140">140 · default</button>
+            <button type="button" data-c="sharp170" data-k="170" data-name="sharp" data-i18n="sharp170">170 · sharp</button>
+          </div>
+          <p class="hint" data-i18n="sharp_note">Kept on the SD card; applied at once in day mode.</p>
+        </div>
       </div>
-      <h3 data-i18n="lights">Lights</h3>
-      <div class="row">
-        <button type="button" id="wl" data-toggle="wl" data-i18n="wl" aria-pressed="false">White light</button>
-        <button type="button" id="ir" data-toggle="ir" data-i18n="ir" aria-pressed="false">IR light</button>
-      </div>
-      <h3 data-i18n="sharp_title">Sharpness (day)</h3>
-      <div class="row">
-        <button type="button" data-c="sharp125" data-k="125" data-name="sharp" data-i18n="sharp125">125 · soft</button>
-        <button type="button" data-c="sharp140" data-k="140" data-name="sharp" data-i18n="sharp140">140 · default</button>
-        <button type="button" data-c="sharp170" data-k="170" data-name="sharp" data-i18n="sharp170">170 · sharp</button>
-      </div>
-      <p class="note" data-i18n="sharp_note">Saved on the SD card and kept after a reboot. Applied at once in day mode.</p>
     </section>
     <section class="card">
-      <h2 data-i18n="md_title">Motion detection</h2>
-      <h3 data-i18n="md_sens">Sensitivity</h3>
-      <div class="row">
-        <button type="button" data-sens="0" data-i18n="s_low">Low</button>
-        <button type="button" data-sens="1" data-i18n="s_mid">Medium</button>
-        <button type="button" data-sens="2" data-i18n="s_high">High</button>
+      <div class="ch"><h2 data-i18n="md_title">Motion detection</h2><span class="legend"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span data-i18n="boot_legend">Applies after a reboot</span></span></div>
+      <div class="cb">
+        <div class="set" id="md_s">
+          <div class="lab"><span data-i18n="md_sens">Sensitivity</span><span class="dot" aria-hidden="true"></span></div>
+          <div class="seg" role="group" data-i18n-label="md_sens">
+            <button type="button" data-sens="0" data-i18n="s_low">Low</button>
+            <button type="button" data-sens="1" data-i18n="s_mid">Medium</button>
+            <button type="button" data-sens="2" data-i18n="s_high">High</button>
+          </div>
+        </div>
+        <div class="set" id="md_t">
+          <div class="lab"><span data-i18n="md_track">Tracking</span><span class="dot" aria-hidden="true"></span></div>
+          <div class="seg" role="group" data-i18n-label="md_track">
+            <button type="button" data-track="1" data-i18n="on">On</button>
+            <button type="button" data-track="0" data-i18n="off">Off</button>
+          </div>
+          <p class="hint" data-i18n="md_track_hint">The camera turns when motion reaches the left or right quarter of the picture.</p>
+        </div>
+        <div class="set" id="md_z">
+          <div class="lab"><span data-i18n="md_zones">Alarm zones</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="dot" aria-hidden="true"></span></div>
+          <div class="line">
+            <button type="button" id="zedit" data-i18n="z_edit">Edit on preview</button>
+            <button type="button" id="zclear" data-i18n="z_clear">Clear</button>
+            <span class="hint" id="zinfo"></span>
+          </div>
+          <p class="hint" id="zhelp" data-i18n="z_help" hidden>Drag on the preview to draw a zone. Tap a zone to remove it.</p>
+          <p class="hint" data-i18n="md_zone_hint">Motion outside the zones is not recorded. For tracking, keep the whole frame.</p>
+        </div>
       </div>
-      <h3 data-i18n="md_track">Tracking (camera follows motion)</h3>
-      <div class="row">
-        <button type="button" data-track="1" data-i18n="on">On</button>
-        <button type="button" data-track="0" data-i18n="off">Off</button>
-      </div>
-      <h3 data-i18n="md_zones">Alarm zones</h3>
-      <div class="row">
-        <button type="button" id="zedit" data-i18n="z_edit">Edit on preview</button>
-        <button type="button" id="zclear" data-i18n="z_clear">Clear</button>
-        <span class="note" id="zinfo" style="align-self:center;margin:0"></span>
-      </div>
-      <p class="note" id="zhelp" data-i18n="z_help" hidden>Drag on the preview to draw a zone. Tap a zone to remove it.</p>
-      <h3 data-i18n="md_apply">Apply</h3>
-      <div class="row"><button type="button" id="mdsave" data-i18n="md_save">Save and reboot</button></div>
-      <p class="note" data-i18n="md_note">Applied after a reboot (about 1 minute). Motion outside the zones is not recorded. While tracking is on, zones are ignored.</p>
+      <div class="cf"><span class="sum" id="mdsum" role="status"></span><div class="row"><button type="button" id="mdreset" data-i18n="cancel">Cancel</button><button type="button" id="mdsave" class="primary" data-i18n="md_save">Save</button></div></div>
     </section>
   </div>
   <div class="bottom">
     <section class="card">
-      <h2 data-i18n="status">Status</h2>
-      <dl id="status"></dl>
+      <div class="ch"><h2 data-i18n="status">Status</h2></div>
+      <div class="cb"><dl id="status"></dl></div>
     </section>
     <section class="card">
-      <h2 data-i18n="links">Links</h2>
-      <div><a id="gallery" href="#" target="_blank" rel="noopener" data-i18n="gallery">Recordings (8090)</a></div>
-      <h3 data-i18n="rtsp_title">RTSP (VLC etc.)</h3>
-      <div class="copy"><input id="rtsp" readonly aria-label="RTSP"><button id="copy" type="button" data-i18n="copy">Copy</button></div>
+      <div class="ch"><h2 data-i18n="links">Links</h2></div>
+      <div class="cb">
+        <div class="set">
+          <div class="lab" data-i18n="rec_title">Recordings</div>
+          <a class="btnlink" id="gallery" href="#" target="_blank" rel="noopener" data-i18n="gallery">Recordings (8090)</a>
+        </div>
+        <div class="set">
+          <div class="lab" data-i18n="rtsp_title">RTSP (VLC etc.)</div>
+          <div class="copy"><input id="rtsp" readonly aria-label="RTSP"><button id="copy" type="button" data-i18n="copy">Copy</button></div>
+        </div>
+      </div>
     </section>
     <section class="card">
-      <h2 data-i18n="maint">Maintenance</h2>
-      <div class="row">
-        <button type="button" class="danger" data-c="reboot" data-name="reboot" data-confirm="c_reboot" data-i18n="reboot">Reboot</button>
-        <button type="button" id="logbtn" data-i18n="logs_show">Show logs</button>
+      <div class="ch"><h2 data-i18n="maint">Maintenance</h2></div>
+      <div class="cb">
+        <div class="row">
+          <button type="button" class="danger" data-c="reboot" data-name="reboot" data-confirm="c_reboot" data-i18n="reboot">Reboot</button>
+          <button type="button" id="logbtn" data-i18n="logs_show">Show logs</button>
+        </div>
+        <div class="set">
+          <div class="lab" data-i18n="next_title">On next boot</div>
+          <div class="seg" role="group" data-i18n-label="next_title">
+            <button type="button" data-c="next_patched" data-name="next_patched" data-confirm="c_patched" data-i18n="use_patched">Patched build</button>
+            <button type="button" data-c="next_stock" data-name="next_stock" data-confirm="c_stock" data-i18n="use_stock">Stock firmware</button>
+          </div>
+        </div>
+        <div class="set">
+          <div class="lab" data-i18n="nightly_title">Nightly restart</div>
+          <div class="seg" role="group" data-i18n-label="nightly_title">
+            <button type="button" data-nightly="1" data-i18n="on">On</button>
+            <button type="button" data-nightly="0" data-i18n="off">Off</button>
+          </div>
+          <p class="hint" data-i18n="nightly_note">Once a night between 02:00 and 04:00.</p>
+          <p class="hint" id="nightly_wait" data-i18n="nightly_wait" hidden></p>
+        </div>
+        <pre id="logs" hidden></pre>
       </div>
-      <h3 data-i18n="next_title">On next boot</h3>
-      <div class="row">
-        <button type="button" data-c="next_patched" data-name="next_patched" data-confirm="c_patched" data-i18n="use_patched">Patched build</button>
-        <button type="button" data-c="next_stock" data-name="next_stock" data-confirm="c_stock" data-i18n="use_stock">Stock firmware</button>
-      </div>
-      <h3 data-i18n="nightly_title">Nightly restart</h3>
-      <div class="row">
-        <button type="button" data-nightly="1" data-i18n="on">On</button>
-        <button type="button" data-nightly="0" data-i18n="off">Off</button>
-      </div>
-      <p class="note" data-i18n="nightly_note">The stock firmware restarts the camera once a night, at a random time between 02:00 and 04:00.</p>
-      <p class="note" id="nightly_wait" data-i18n="nightly_wait" hidden></p>
-      <pre id="logs" hidden></pre>
     </section>
     <section class="card wide" id="camcard">
-      <h2 data-i18n="cam_title">Camera settings</h2>
-      <div class="cgrid">
-        <div><h3 data-i18n="cam_nightview">Night picture</h3><div class="row">
-          <button type="button" data-cam="c" data-v="0" data-i18n="nc0">Infrared (black and white)</button>
-          <button type="button" data-cam="c" data-v="1" data-i18n="nc1">Colour, brighter on motion</button>
-          <button type="button" data-cam="c" data-v="2" data-i18n="nc2">Colour</button></div></div>
-        <div><h3 data-i18n="cam_night">Switch to night</h3><div class="row">
-          <button type="button" data-cam="n" data-v="400" data-i18n="earlier">Earlier</button>
-          <button type="button" data-cam="n" data-v="200" data-i18n="dflt">Default</button>
-          <button type="button" data-cam="n" data-v="100" data-i18n="later">Later</button></div></div>
-        <div><h3 data-i18n="cam_day">Back to day</h3><div class="row">
-          <button type="button" data-cam="d" data-v="2000" data-i18n="earlier">Earlier</button>
-          <button type="button" data-cam="d" data-v="3300" data-i18n="dflt">Default</button>
-          <button type="button" data-cam="d" data-v="5000" data-i18n="later">Later</button></div></div>
-        <div><h3 data-i18n="cam_hourly">Hourly day check (04:00–17:00)</h3><div class="row">
-          <button type="button" data-cam="h" data-v="1" data-i18n="on">On</button>
-          <button type="button" data-cam="h" data-v="0" data-i18n="off">Off</button>
-          <button type="button" id="retest" data-i18n="retest">Check now</button></div></div>
-        <div><h3 data-i18n="cam_person">Person detection</h3><div class="row">
-          <button type="button" data-cam="p" data-v="0" data-i18n="p0">Same as motion</button>
-          <button type="button" data-cam="p" data-v="70" data-i18n="p70">Strict</button>
-          <button type="button" data-cam="p" data-v="40" data-i18n="p40">Medium</button>
-          <button type="button" data-cam="p" data-v="10" data-i18n="p10">Loose</button></div></div>
-        <div><h3 data-i18n="cam_rec">SD recording</h3><div class="row">
-          <button type="button" data-cam="r" data-v="1" data-i18n="r1">Motion events</button>
-          <button type="button" data-cam="r" data-v="2" data-i18n="r2">Continuous</button>
-          <button type="button" data-cam="r" data-v="0" data-i18n="off">Off</button></div></div>
-        <div><h3 data-i18n="cam_vol">Speaker volume</h3><div class="row">
-          <button type="button" data-cam="v" data-v="2" data-i18n="s_low">Low</button>
-          <button type="button" data-cam="v" data-v="6" data-i18n="s_mid">Medium</button>
-          <button type="button" data-cam="v" data-v="10" data-i18n="s_high">High</button></div></div>
-        <div><h3 data-i18n="cam_voice">Voice prompts</h3><div class="row">
-          <button type="button" data-cam="s" data-v="1" data-i18n="on">On</button>
-          <button type="button" data-cam="s" data-v="0" data-i18n="off">Off</button></div></div>
-        <div><h3 data-i18n="cam_osd">Time stamp</h3><div class="row">
-          <button type="button" data-cam="o" data-v="-1" data-i18n="off">Off</button>
-          <button type="button" data-cam="o" data-v="0" data-i18n="o0">Top left</button>
-          <button type="button" data-cam="o" data-v="1" data-i18n="o1">Top right</button>
-          <button type="button" data-cam="o" data-v="2" data-i18n="o2">Bottom left</button>
-          <button type="button" data-cam="o" data-v="3" data-i18n="o3">Bottom right</button></div></div>
-        <div><h3 data-i18n="cam_rotate">Picture</h3><div class="row">
-          <button type="button" data-cam="t" data-v="0" data-i18n="t0">Normal</button>
-          <button type="button" data-cam="t" data-v="1" data-i18n="t1">Upside down (180°)</button></div></div>
+      <div class="ch"><h2 data-i18n="cam_title">Camera settings</h2><span class="legend"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span data-i18n="boot_legend">Applies after a reboot</span></span></div>
+      <div class="grid3">
+        <div class="cb">
+          <h3 data-i18n="g_daynight">Night and day</h3>
+          <div class="set" data-key="c">
+            <div class="lab"><span data-i18n="cam_nightview">Night picture</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_nightview">
+              <button type="button" data-cam="c" data-v="0" data-i18n="nc0">Infrared</button>
+              <button type="button" data-cam="c" data-v="2" data-i18n="nc2">Colour</button>
+              <button type="button" data-cam="c" data-v="1" data-i18n="nc1">Colour + motion</button>
+            </div>
+            <p class="hint" data-i18n="h_nightcolor">Colour modes turn the white light on at night.</p>
+          </div>
+          <div class="set" data-key="n">
+            <div class="lab"><span data-i18n="cam_night">Switch to night</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_night">
+              <button type="button" data-cam="n" data-v="400" data-i18n="earlier">Earlier</button>
+              <button type="button" data-cam="n" data-v="200" data-i18n="dflt">Default</button>
+              <button type="button" data-cam="n" data-v="100" data-i18n="later">Later</button>
+            </div>
+          </div>
+          <div class="set" data-key="d">
+            <div class="lab"><span data-i18n="cam_day">Back to day</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_day">
+              <button type="button" data-cam="d" data-v="2000" data-i18n="earlier">Earlier</button>
+              <button type="button" data-cam="d" data-v="3300" data-i18n="dflt">Default</button>
+              <button type="button" data-cam="d" data-v="5000" data-i18n="later">Later</button>
+            </div>
+            <p class="hint" data-i18n="h_day">Returning too early can make the camera switch back and forth.</p>
+          </div>
+          <div class="set" data-key="h">
+            <div class="lab"><span data-i18n="cam_hourly">Hourly day check</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="line">
+              <div class="seg" role="group" data-i18n-label="cam_hourly">
+                <button type="button" data-cam="h" data-v="1" data-i18n="on">On</button>
+                <button type="button" data-cam="h" data-v="0" data-i18n="off">Off</button>
+              </div>
+              <button type="button" id="retest" data-i18n="retest">Check now</button>
+            </div>
+            <p class="hint" data-i18n="h_hourly">04:00–17:00. When off, a dim room may stay in night mode all day.</p>
+            <p class="hint" id="hourly_na" data-i18n="hourly_na" hidden>The hourly switch needs patched build v11.</p>
+          </div>
+        </div>
+        <div class="cb">
+          <h3 data-i18n="g_detrec">Detection and recording</h3>
+          <div class="set" data-key="p">
+            <div class="lab"><span data-i18n="cam_person">Person detection</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_person">
+              <button type="button" data-cam="p" data-v="0" data-i18n="p0">Auto</button>
+              <button type="button" data-cam="p" data-v="70" data-i18n="p70">Strict</button>
+              <button type="button" data-cam="p" data-v="40" data-i18n="p40">Medium</button>
+              <button type="button" data-cam="p" data-v="10" data-i18n="p10">Loose</button>
+            </div>
+            <p class="hint" data-i18n="h_person">Auto follows the motion sensitivity.</p>
+          </div>
+          <div class="set" data-key="r">
+            <div class="lab"><span data-i18n="cam_rec">SD recording</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_rec">
+              <button type="button" data-cam="r" data-v="1" data-i18n="r1">Motion events</button>
+              <button type="button" data-cam="r" data-v="2"><span data-i18n="r2">Continuous</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+              <button type="button" data-cam="r" data-v="0" data-i18n="off">Off</button>
+            </div>
+            <p class="hint" data-i18n="h_rec">Continuous recording fills the card fast and deletes the oldest days first.</p>
+          </div>
+        </div>
+        <div class="cb">
+          <h3 data-i18n="g_picsound">Picture and sound</h3>
+          <div class="set" data-key="o">
+            <div class="lab"><span data-i18n="cam_osd">Time stamp</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_osd">
+              <button type="button" data-cam="o" data-v="-1" data-i18n="off">Off</button>
+              <button type="button" data-cam="o" data-v="0" data-i18n-label="o0" data-i18n-title="o0"><svg width="20" height="16" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="2" width="20" height="16" rx="2.5"/><rect x="4" y="5" width="7" height="4" rx="1" fill="currentColor" stroke="none"/></svg></button>
+              <button type="button" data-cam="o" data-v="1" data-i18n-label="o1" data-i18n-title="o1"><svg width="20" height="16" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="2" width="20" height="16" rx="2.5"/><rect x="13" y="5" width="7" height="4" rx="1" fill="currentColor" stroke="none"/></svg></button>
+              <button type="button" data-cam="o" data-v="2" data-i18n-label="o2" data-i18n-title="o2"><svg width="20" height="16" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="2" width="20" height="16" rx="2.5"/><rect x="4" y="11" width="7" height="4" rx="1" fill="currentColor" stroke="none"/></svg></button>
+              <button type="button" data-cam="o" data-v="3" data-i18n-label="o3" data-i18n-title="o3"><svg width="20" height="16" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="2" width="20" height="16" rx="2.5"/><rect x="13" y="11" width="7" height="4" rx="1" fill="currentColor" stroke="none"/></svg></button>
+            </div>
+          </div>
+          <div class="set" data-key="t">
+            <div class="lab"><span data-i18n="cam_rotate">Picture direction</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_rotate">
+              <button type="button" data-cam="t" data-v="0" data-i18n="t0">Normal</button>
+              <button type="button" data-cam="t" data-v="1" data-i18n="t1">180°</button>
+            </div>
+            <p class="hint" data-i18n="h_rotate">When turned, the panel arrows swap too.</p>
+          </div>
+          <div class="set" data-key="v">
+            <div class="lab"><span data-i18n="cam_vol">Speaker volume</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="seg" role="group" data-i18n-label="cam_vol">
+              <button type="button" data-cam="v" data-v="2" data-i18n="s_low">Low</button>
+              <button type="button" data-cam="v" data-v="6" data-i18n="s_mid">Medium</button>
+              <button type="button" data-cam="v" data-v="10" data-i18n="s_high">High</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="row" style="margin-top:14px"><button type="button" id="camsave" data-i18n="md_save">Save</button></div>
-      <p class="note" data-i18n="cam_note">Thresholds, the hourly check, person detection, recording on or off, volume and voice prompts apply at once. Night picture, continuous recording, time stamp and picture turn need a reboot.</p>
-      <p class="note" data-i18n="cam_note2">Earlier and Later move the light level at which the camera switches. Returning to day too early can make it switch back and forth: after 7 switches in 5 minutes it stays in night mode for 30 minutes. Without the hourly check a dim room may stay in night mode all day; with it, the picture blinks once an hour while it is dark. Continuous recording fills the SD card quickly and deletes the oldest days first. With the picture turned, the panel arrows are swapped to match.</p>
-      <p class="note" id="hourly_na" data-i18n="hourly_na" hidden>The hourly switch needs patched build v11.</p>
+      <div class="cf"><span class="sum" id="camsum" role="status"></span><div class="row"><button type="button" id="camreset" data-i18n="cancel">Cancel</button><button type="button" id="camsave" class="primary" data-i18n="md_save">Save</button></div></div>
     </section>
     <section class="card wide">
-      <details>
-        <summary data-i18n="advanced">Advanced: original test commands</summary>
-        <p class="note" data-i18n="adv_note">The commands of the original Augentix page, unchanged.</p>
-        <div class="row">
-          <button type="button" data-c="play">playaudio NoId.wav</button>
-          <button type="button" data-c="wlon">whitelight?mode=on</button>
-          <button type="button" data-c="wlof">whitelight?mode=off</button>
-          <button type="button" data-c="redinfraon">redinfra?mode=on</button>
-          <button type="button" data-c="redinfraof">redinfra?mode=off</button>
-          <button type="button" data-c="irctrlnig">irctrl?mode=night</button>
-          <button type="button" data-c="irctrlday">irctrl?mode=day</button>
-          <button type="button" data-c="ircutonlyday">ircut_only?mode=day</button>
-          <button type="button" data-c="ircutonlynig">ircut_only?mode=night</button>
-          <button type="button" data-c="ircutnig">ircut?mode=night</button>
-          <button type="button" data-c="ircutday">ircut?mode=day</button>
-          <button type="button" data-c="Won">GPIO 12 W LEDs On</button>
-          <button type="button" data-c="Woff">GPIO 12 W LEDs Off</button>
-          <button type="button" data-c="iron">GPIO 77 IR LEDs On</button>
-          <button type="button" data-c="iroff">GPIO 77 IR LEDs Off</button>
-        </div>
-      </details>
+      <div class="cb">
+        <details>
+          <summary data-i18n="advanced">Advanced: original test commands</summary>
+          <p class="hint" style="margin-top:8px" data-i18n="adv_note">The commands of the original Augentix page, unchanged.</p>
+          <div class="row">
+            <button type="button" data-c="play">playaudio NoId.wav</button>
+            <button type="button" data-c="wlon">whitelight?mode=on</button>
+            <button type="button" data-c="wlof">whitelight?mode=off</button>
+            <button type="button" data-c="redinfraon">redinfra?mode=on</button>
+            <button type="button" data-c="redinfraof">redinfra?mode=off</button>
+            <button type="button" data-c="irctrlnig">irctrl?mode=night</button>
+            <button type="button" data-c="irctrlday">irctrl?mode=day</button>
+            <button type="button" data-c="ircutonlyday">ircut_only?mode=day</button>
+            <button type="button" data-c="ircutonlynig">ircut_only?mode=night</button>
+            <button type="button" data-c="ircutnig">ircut?mode=night</button>
+            <button type="button" data-c="ircutday">ircut?mode=day</button>
+            <button type="button" data-c="Won">GPIO 12 W LEDs On</button>
+            <button type="button" data-c="Woff">GPIO 12 W LEDs Off</button>
+            <button type="button" data-c="iron">GPIO 77 IR LEDs On</button>
+            <button type="button" data-c="iroff">GPIO 77 IR LEDs Off</button>
+          </div>
+        </details>
+      </div>
     </section>
   </div>
 </main>
@@ -647,7 +750,7 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  pv_note:'About 1 frame per second, 640×360. Use the RTSP address for full quality.',pv_live:'Live',pv_fail:'No image, retrying…',pv_stopped:'Stopped',
  ptz_label:'Camera direction',t_step:'One short step',t_hold:'Hold to move',ptz_note:'Arrows move while held; corners take one short step.',
  controls:'Controls',image_mode:'Image mode',day:'Day',night:'Night',auto:'Auto',lights:'Lights',wl:'White light',ir:'IR light',pos_now:'Pan {0} / {1}, tilt {2} / {3}',p_save:'Save here',p_pick:'Pick a number to save this position',p_empty:'Empty',p_saved:'Position {0} saved',p_going:'Moving to position {0}…',p_there:'At position {0}',ERR_empty:'nothing saved there',ERR_ptz:'the camera did not answer',
- sharp_title:'Sharpness (day)',sharp125:'125 · soft',sharp140:'140 · default',sharp170:'170 · sharp',sharp:'Sharpness',sharp_note:'Saved on the SD card and kept after a reboot. Applied at once in day mode.',
+ sharp_title:'Sharpness (day)',sharp125:'125 · soft',sharp140:'140 · default',sharp170:'170 · sharp',sharp:'Sharpness',sharp_note:'Kept on the SD card; applied at once in day mode.',
  status:'Status',links:'Links',gallery:'Recordings (8090)',rtsp_title:'RTSP (VLC etc.)',copy:'Copy',copied:'RTSP address copied',
  maint:'Maintenance',reboot:'Reboot',logs_show:'Show logs',logs_hide:'Hide logs',loading:'Loading…',next_title:'On next boot',use_patched:'Patched build',use_stock:'Stock firmware',
  next_patched:'Next boot: patched',next_stock:'Next boot: stock',
@@ -658,26 +761,30 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  OK:'done',sharp_applied:'sharpness {0} applied and saved',sharp_saved:'sharpness {0} saved, applied when day mode starts',
  rebooting:'rebooting, the page is back in about a minute',ERR_sharp_busy:'another sharpness change is running, try again in 20 s',ERR_sd_write:'could not write to the SD card, nothing changed',
  ERR_no_sd:'no SD card',ERR_no_loader:'loader or p2pcam.sqfs missing in clean/',ERR_unknown:'unknown command',ERR_post_only:'commands only work from the buttons',
- md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking (camera follows motion)',on:'On',off:'Off',md_zones:'Alarm zones',g_hide:'Hide grid',g_show:'Show grid',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save',md_note:'Sensitivity and tracking apply at once, zones after a reboot. Motion outside the zones is not recorded. With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once it reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.',c_md:'Saved. This change needs a reboot. Reboot now? No video and no recording for about a minute.',md_applied:'Saved and applied.',md_later:'Saved. It applies after the next reboot.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
+ md_title:'Motion detection',md_sens:'Sensitivity',s_low:'Low',s_mid:'Medium',s_high:'High',md_track:'Tracking',on:'On',off:'Off',md_zones:'Alarm zones',g_hide:'Hide grid',g_show:'Show grid',z_edit:'Edit on preview',z_done:'Done',z_clear:'Clear',z_all:'Whole frame',z_n:'{0} zone(s)',z_full:'At most 25 zones',z_help:'Drag on the preview to draw a zone. Tap a zone to remove it.',md_apply:'Apply',md_save:'Save',c_md:'Saved. This change needs a reboot. Reboot now? No video and no recording for about a minute.',md_applied:'Saved and applied.',md_later:'Saved. It applies after the next reboot.',md_saved:'saved',md_saving:'Saving…',md_rebooting:'Saved. Rebooting, the page is back in about a minute.',ERR_invalid:'invalid settings, nothing changed',
  k_build:'Software',k_next:'Next boot',k_mode:'Image mode',k_sharpness:'Sharpness',k_cloud:'Cloud block',k_recorder:'Motion snapshots',k_lastmotion:'Last motion',k_sd:'SD card',k_wifi:'Wi-Fi signal',k_mem:'Free memory',k_cpu:'CPU',k_uptime:'Uptime',k_time:'Camera clock',k_hack:'Base hack',k_bootlog:'Last boot log',
  v_patched:'Patched (native 720p, day 25 FPS)',v_stock:'Stock (1080p upscaled, 12.5 FPS)',v_next_patched:'Patched',v_next_disabled:'Stock (patched build disabled)',v_next_pending:'Stock (loader re-armed 5 min after boot)',
  m_auto:'Auto ({0})',m_day:'Day',m_night:'Night',m_light:'White light',m_unknown:'Unknown',v_blocked:'Blocked ({0} routes, DNS off)',v_open:'OPEN: {0} routes, DNS {1}',v_running:'Running',v_stopped:'Not running',v_none:'None',v_nosd:'No SD card',
  v_sd:'{0} used of {1} ({2}%)',v_cpu:'{0}% in use',v_persistent:'Persistent (/bak)',d:'d',h:'h',min:'min',
- nightly_title:'Nightly restart',nightly_note:'The stock firmware restarts the camera once a night, at a random time between 02:00 and 04:00. It does so only after about 22 hours of uptime and when nothing is being recorded. The restart takes about a minute and clears problems that build up when the camera runs for days. When it is off, the camera runs until you restart it. A stock boot always keeps it on, so the patched build comes back by itself.',
+ nightly_title:'Nightly restart',nightly_note:'The stock firmware restarts once a night between 02:00 and 04:00, after about 22 hours of uptime and only while nothing is being recorded. A stock boot always keeps it on.',
  nightly_wait:'Off is saved. This boot runs the stock firmware, so the restart stays on until the next patched boot.',nightly_live:'saved and applied',nightly_saved:'saved, applies on the next patched boot',
  k_nightly:'Nightly restart',v_nightly_on:'On, next around {0}',v_nightly_off:'Off',
- cam_title:'Camera settings',cam_nightview:'Night picture',nc0:'Infrared (black and white)',nc1:'Colour, brighter on motion',nc2:'Colour',
- cam_night:'Switch to night',cam_day:'Back to day',earlier:'Earlier',dflt:'Default',later:'Later',cam_hourly:'Hourly day check (04:00–17:00)',retest:'Check now',
- cam_person:'Person detection',p0:'Same as motion',p70:'Strict',p40:'Medium',p10:'Loose',cam_rec:'SD recording',r1:'Motion events',r2:'Continuous',
- cam_vol:'Speaker volume',cam_voice:'Voice prompts',cam_osd:'Time stamp',o0:'Top left',o1:'Top right',o2:'Bottom left',o3:'Bottom right',cam_rotate:'Picture',t0:'Normal',t1:'Upside down (180°)',
- cam_note:'Thresholds, the hourly check, person detection, recording on or off, volume and voice prompts apply at once. Night picture, continuous recording, time stamp and picture turn need a reboot.',
- cam_note2:'Earlier and Later move the light level at which the camera switches. Returning to day too early can make it switch back and forth: after 7 switches in 5 minutes it stays in night mode for 30 minutes. Without the hourly check a dim room may stay in night mode all day; with it, the picture blinks once an hour while it is dark. Continuous recording fills the SD card quickly and deletes the oldest days first. With the picture turned, the panel arrows are swapped to match.',
+ cam_title:'Camera settings',cam_nightview:'Night picture',nc0:'Infrared',nc1:'Colour + motion',nc2:'Colour',
+ cam_night:'Switch to night',cam_day:'Back to day',earlier:'Earlier',dflt:'Default',later:'Later',cam_hourly:'Hourly day check',retest:'Check now',
+ cam_person:'Person detection',p0:'Auto',p70:'Strict',p40:'Medium',p10:'Loose',cam_rec:'SD recording',r1:'Motion events',r2:'Continuous',
+ cam_vol:'Speaker volume',cam_osd:'Time stamp',o0:'Top left',o1:'Top right',o2:'Bottom left',o3:'Bottom right',cam_rotate:'Picture direction',t0:'Normal',t1:'180°',
+ g_daynight:'Night and day',g_detrec:'Detection and recording',g_picsound:'Picture and sound',boot_legend:'Applies after a reboot',
+ h_nightcolor:'Colour modes turn the white light on at night.',h_day:'Returning too early can make the camera switch back and forth.',
+ h_hourly:'04:00–17:00. When off, a dim room may stay in night mode all day.',h_person:'Auto follows the motion sensitivity.',
+ h_rec:'Continuous recording fills the card fast and deletes the oldest days first.',h_rotate:'When turned, the panel arrows swap too.',
+ cancel:'Cancel',no_changes:'No changes',n_changes:'{0} change(s)',n_boot:', {0} need a reboot',all_live:', all apply at once',
+ md_track_hint:'The camera turns when motion reaches the left or right quarter of the picture.',md_zone_hint:'Motion outside the zones is not recorded. For tracking, keep the whole frame.',rec_title:'Recordings',
  hourly_na:'The hourly switch needs patched build v11.',c_cam:'Saved. Some of these settings need a reboot. Reboot now? No video and no recording for about a minute.',day_retest:'day check started, the picture may change for a moment',cam_name:'Camera settings'},
 tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera önizlemesi',connecting:'Bağlanıyor…',pv_stop:'Önizlemeyi durdur',pv_start:'Önizlemeyi başlat',
  pv_note:'Saniyede yaklaşık 1 kare, 640×360. Tam kalite için RTSP adresini kullanın.',pv_live:'Canlı',pv_fail:'Görüntü alınamadı, yeniden deneniyor…',pv_stopped:'Durduruldu',
  ptz_label:'Kamera yönü',t_step:'Kısa bir adım',t_hold:'Basılı tutun',ptz_note:'Oklar basılı tutulduğu sürece döner; köşeler kısa bir adım atar.',
  controls:'Kontroller',image_mode:'Görüntü modu',day:'Gündüz',night:'Gece',auto:'Otomatik',lights:'Işıklar',wl:'Beyaz ışık',ir:'Kızılötesi ışık',pos_now:'Yatay {0} / {1}, dikey {2} / {3}',p_save:'Buraya kaydet',p_pick:'Bu konumu kaydetmek için bir numara seçin',p_empty:'Boş',p_saved:'{0}. konum kaydedildi',p_going:'{0}. konuma gidiliyor…',p_there:'{0}. konumda',ERR_empty:'orada kayıt yok',ERR_ptz:'kamera yanıt vermedi',
- sharp_title:'Keskinlik (gündüz)',sharp125:'125 · yumuşak',sharp140:'140 · varsayılan',sharp170:'170 · keskin',sharp:'Keskinlik',sharp_note:'SD karta kaydedilir ve yeniden başlatmada kalır. Gündüzse hemen uygulanır.',
+ sharp_title:'Keskinlik (gündüz)',sharp125:'125 · yumuşak',sharp140:'140 · varsayılan',sharp170:'170 · keskin',sharp:'Keskinlik',sharp_note:'SD kartta saklanır; gündüzse hemen uygulanır.',
  status:'Durum',links:'Bağlantılar',gallery:'Kayıtlar (8090)',rtsp_title:'RTSP (VLC vb.)',copy:'Kopyala',copied:'RTSP adresi kopyalandı',
  maint:'Bakım',reboot:'Yeniden başlat',logs_show:'Günlükleri göster',logs_hide:'Günlükleri gizle',loading:'Okunuyor…',next_title:'Sonraki açılışta',use_patched:'Yamalı sürüm',use_stock:'Stok yazılım',
  next_patched:'Sonraki açılış: yamalı',next_stock:'Sonraki açılış: stok',
@@ -688,20 +795,24 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  OK:'tamam',sharp_applied:'keskinlik {0} uygulandı ve kaydedildi',sharp_saved:'keskinlik {0} kaydedildi, gündüz moduna geçince uygulanır',
  rebooting:'yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir',ERR_sharp_busy:'başka bir keskinlik işlemi sürüyor, 20 sn sonra tekrar deneyin',ERR_sd_write:'SD karta yazılamadı, hiçbir şey değişmedi',
  ERR_no_sd:'SD kart yok',ERR_no_loader:'clean/ içinde yükleyici ya da p2pcam.sqfs yok',ERR_unknown:'bilinmeyen komut',ERR_post_only:'komutlar yalnız düğmelerle çalışır',
- md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip (kamera hareketi izler)',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',g_hide:'Izgarayı gizle',g_show:'Izgarayı göster',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet',md_note:'Hassasiyet ve takip hemen uygulanır, bölgeler yeniden başlatınca. Bölge dışındaki hareket kaydedilmez. Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.',c_md:'Kaydedildi. Bu değişiklik için yeniden başlatma gerekiyor. Şimdi yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_applied:'Kaydedildi ve uygulandı.',md_later:'Kaydedildi. Bir sonraki yeniden başlatmada uygulanır.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
+ md_title:'Hareket algılama',md_sens:'Hassasiyet',s_low:'Düşük',s_mid:'Orta',s_high:'Yüksek',md_track:'Takip',on:'Açık',off:'Kapalı',md_zones:'Alarm bölgeleri',g_hide:'Izgarayı gizle',g_show:'Izgarayı göster',z_edit:'Önizlemede düzenle',z_done:'Bitti',z_clear:'Temizle',z_all:'Bütün kare',z_n:'{0} bölge',z_full:'En çok 25 bölge',z_help:'Bölge çizmek için önizlemede sürükleyin. Silmek için bölgeye dokunun.',md_apply:'Uygula',md_save:'Kaydet',c_md:'Kaydedildi. Bu değişiklik için yeniden başlatma gerekiyor. Şimdi yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',md_applied:'Kaydedildi ve uygulandı.',md_later:'Kaydedildi. Bir sonraki yeniden başlatmada uygulanır.',md_saved:'kaydedildi',md_saving:'Kaydediliyor…',md_rebooting:'Kaydedildi. Yeniden başlatılıyor, sayfa yaklaşık 1 dakika sonra geri gelir.',ERR_invalid:'geçersiz ayar, hiçbir şey değişmedi',
  k_build:'Yazılım',k_next:'Sonraki açılış',k_mode:'Görüntü modu',k_sharpness:'Keskinlik',k_cloud:'Bulut engeli',k_recorder:'Hareket fotoğrafları',k_lastmotion:'Son hareket',k_sd:'SD kart',k_wifi:'WiFi sinyali',k_mem:'Boş bellek',k_cpu:'İşlemci',k_uptime:'Açık kalma',k_time:'Kamera saati',k_hack:'Temel hack',k_bootlog:'Son açılış kaydı',
  v_patched:'Yamalı (gerçek 720p, gündüz 25 FPS)',v_stock:'Stok (1080p büyütülmüş, 12,5 FPS)',v_next_patched:'Yamalı',v_next_disabled:'Stok (yamalı sürüm kapalı)',v_next_pending:'Stok (yükleyici açılıştan 5 dk sonra kurulur)',
  m_auto:'Otomatik ({0})',m_day:'Gündüz',m_night:'Gece',m_light:'Beyaz ışık',m_unknown:'Bilinmiyor',v_blocked:'Engelli ({0} rota, DNS kapalı)',v_open:'AÇIK: {0} rota, DNS {1}',v_running:'Çalışıyor',v_stopped:'Çalışmıyor',v_none:'Yok',v_nosd:'SD kart yok',
  v_sd:'{0} dolu / {1} (%{2})',v_cpu:'%{0} kullanımda',v_persistent:'Kalıcı (/bak)',d:'gün',h:'sa',min:'dk',
- nightly_title:'Gece yeniden başlatma',nightly_note:'Stok yazılım kamerayı her gece bir kez, 02:00 ile 04:00 arasında rastgele bir saatte yeniden başlatır. Bunu yalnız kamera yaklaşık 22 saattir açıksa ve o sırada kayıt yapılmıyorsa yapar. Yeniden başlatma yaklaşık bir dakika sürer ve kamera günlerce açık kaldığında biriken sorunları temizler. Kapalıyken kamera siz yeniden başlatana kadar çalışır. Stok açılışta bu ayar hep açık kalır, böylece yamalı sürüm kendiliğinden geri gelir.',
+ nightly_title:'Gece yeniden başlatma',nightly_note:'Stok yazılım kamerayı her gece 02:00–04:00 arasında bir kez yeniden başlatır: yaklaşık 22 saatlik çalışmadan sonra ve kayıt yokken. Stok açılışta hep açık kalır.',
  nightly_wait:'Kapalı ayarı kaydedildi. Bu açılış stok yazılımla yapıldığı için yeniden başlatma, sonraki yamalı açılışa kadar açık kalır.',nightly_live:'kaydedildi ve uygulandı',nightly_saved:'kaydedildi, sonraki yamalı açılışta uygulanır',
  k_nightly:'Gece yeniden başlatma',v_nightly_on:'Açık, sıradaki yaklaşık {0}',v_nightly_off:'Kapalı',
- cam_title:'Kamera ayarları',cam_nightview:'Gece görüntüsü',nc0:'Kızılötesi (siyah-beyaz)',nc1:'Renkli, harekette daha parlak',nc2:'Renkli',
- cam_night:'Geceye geçiş',cam_day:'Gündüze dönüş',earlier:'Daha erken',dflt:'Varsayılan',later:'Daha geç',cam_hourly:'Saat başı gündüz denemesi (04:00–17:00)',retest:'Şimdi dene',
- cam_person:'Kişi algılama',p0:'Hareketle aynı',p70:'Sıkı',p40:'Orta',p10:'Gevşek',cam_rec:'SD kayıt',r1:'Hareket olayları',r2:'Sürekli',
- cam_vol:'Hoparlör sesi',cam_voice:'Sesli uyarılar',cam_osd:'Saat damgası',o0:'Sol üst',o1:'Sağ üst',o2:'Sol alt',o3:'Sağ alt',cam_rotate:'Görüntü',t0:'Normal',t1:'Ters (180°)',
- cam_note:'Eşikler, saat başı deneme, kişi algılama, kaydın açılıp kapanması, ses düzeyi ve sesli uyarılar hemen uygulanır. Gece görüntüsü, sürekli kayıt, saat damgası ve görüntünün çevrilmesi yeniden başlatma ister.',
- cam_note2:'Daha erken ve Daha geç, kameranın geçiş yaptığı ışık düzeyini değiştirir. Gündüze çok erken dönmek kameranın gidip gelmesine yol açabilir: 5 dakikada 7 geçişten sonra 30 dakika gece modunda kalır. Saat başı deneme kapalıyken loş bir oda gün boyu gece modunda kalabilir; açıkken hava karanlıksa görüntü saatte bir kez kısa süre değişir. Sürekli kayıt SD kartı hızla doldurur ve önce en eski günleri siler. Görüntü çevrilince paneldeki oklar da buna göre yer değiştirir.',
+ cam_title:'Kamera ayarları',cam_nightview:'Gece görüntüsü',nc0:'Kızılötesi',nc1:'Renkli + hareket',nc2:'Renkli',
+ cam_night:'Geceye geçiş',cam_day:'Gündüze dönüş',earlier:'Erken',dflt:'Varsayılan',later:'Geç',cam_hourly:'Saat başı gündüz denemesi',retest:'Şimdi dene',
+ cam_person:'Kişi algılama',p0:'Otomatik',p70:'Sıkı',p40:'Orta',p10:'Gevşek',cam_rec:'SD kayıt',r1:'Hareket olayları',r2:'Sürekli',
+ cam_vol:'Hoparlör sesi',cam_osd:'Saat damgası',o0:'Sol üst',o1:'Sağ üst',o2:'Sol alt',o3:'Sağ alt',cam_rotate:'Görüntü yönü',t0:'Normal',t1:'180°',
+ g_daynight:'Gece ve gündüz',g_detrec:'Algılama ve kayıt',g_picsound:'Görüntü ve ses',boot_legend:'Yeniden başlatınca uygulanır',
+ h_nightcolor:'Renkli modlarda geceleri beyaz ışık yanar.',h_day:'Çok erken dönüş, kameranın gidip gelmesine yol açabilir.',
+ h_hourly:'04:00–17:00. Kapalıyken loş bir oda gün boyu gece modunda kalabilir.',h_person:'Otomatik: hareket hassasiyetini izler.',
+ h_rec:'Sürekli kayıt kartı hızla doldurur, önce en eski günleri siler.',h_rotate:'Ters çevrilince paneldeki oklar da yer değiştirir.',
+ cancel:'Vazgeç',no_changes:'Değişiklik yok',n_changes:'{0} değişiklik',n_boot:', {0} tanesi yeniden başlatma ister',all_live:', hepsi hemen uygulanır',
+ md_track_hint:'Kamera, hareket görüntünün sol ya da sağ çeyreğine ulaşınca döner.',md_zone_hint:'Bölge dışındaki hareket kaydedilmez. Takip için bütün kareyi seçili bırakın.',rec_title:'Kayıtlar',
  hourly_na:'Saat başı anahtarı yamalı v11 sürümünü ister.',c_cam:'Kaydedildi. Bu ayarların bir kısmı yeniden başlatma ister. Şimdi yeniden başlatılsın mı? Yaklaşık 1 dakika görüntü ve kayıt olmaz.',day_retest:'gündüz denemesi başladı, görüntü bir an değişebilir',cam_name:'Kamera ayarları'}};
 var lang='en';
 try{var q=new URLSearchParams(location.search).get('lang');if(q==='tr'||q==='en'){localStorage.setItem('hc_lang',q)}lang=localStorage.getItem('hc_lang')||'en'}catch(e){}
@@ -842,7 +953,8 @@ function render(v){
     }
   });
   document.querySelectorAll('button[data-k]').forEach(function(b){b.classList.toggle('on',b.dataset.k===v.sharpness)});
-  ['wl','ir'].forEach(function(k){if(k in v){lit[k]=v[k]==='1';var b=$('#'+k);b.classList.toggle('on',lit[k]);b.setAttribute('aria-pressed',lit[k]?'true':'false')}});
+  ['wl','ir'].forEach(function(k){if(k in v){lit[k]=v[k]==='1';var b=$('#'+k);b.classList.toggle('on',lit[k]);b.setAttribute('aria-checked',lit[k]?'true':'false')}});
+  if(v.next){document.querySelectorAll('button[data-c^="next_"]').forEach(function(b){b.classList.toggle('on',(b.dataset.c==='next_patched')===(v.next==='patched'))})}
   presetUi(v);
   // Buttons show the saved choice; the note explains a stock boot that still restarts.
   var nc=v.nightly_cfg||(nl&&nl[0]);
@@ -860,11 +972,22 @@ function status(){
   }).catch(function(){$('#badge').textContent=t('unreachable')});
 }
 // Motion settings. Zones are x,y,w,h on a 10x10 grid over the preview.
-var md={s:1,t:0,z:[]},editing=false,zb=$('#zonebox'),draft=null,start=null,gridOn=true;
+var md={s:1,t:0,z:[]},mdBase=null,editing=false,zb=$('#zonebox'),draft=null,start=null,gridOn=true;
 try{gridOn=localStorage.getItem('hc_grid')!=='0'}catch(e){}
+function zkey(z){return z.map(function(r){return r.join('-')}).join('_')}
+// Footer of a settings card: what changed and how much of it waits for a reboot.
+function summary(el,saveBtn,changed,boot){
+  el.textContent=changed?t('n_changes',changed)+(boot?t('n_boot',boot):t('all_live')):t('no_changes');
+  el.classList.toggle('dirty',!!changed);saveBtn.disabled=!changed;
+}
 function drawMd(){
   document.querySelectorAll('[data-sens]').forEach(function(b){b.classList.toggle('on',+b.dataset.sens===md.s)});
   document.querySelectorAll('[data-track]').forEach(function(b){b.classList.toggle('on',+b.dataset.track===md.t)});
+  if(mdBase){
+    var cs=md.s!==mdBase.s,ct=md.t!==mdBase.t,cz=zkey(md.z)!==mdBase.z;
+    $('#md_s').classList.toggle('changed',cs);$('#md_t').classList.toggle('changed',ct);$('#md_z').classList.toggle('changed',cz);
+    summary($('#mdsum'),$('#mdsave'),cs+ct+cz,+cz);
+  }
   $('#zinfo').textContent=md.z.length?t('z_n',md.z.length):t('z_all');
   $('#zedit').textContent=t(editing?'z_done':'z_edit');
   zb.textContent='';
@@ -904,6 +1027,7 @@ $('#mdsave').onclick=function(){
   fetch('webui?c=md_save&v='+v,{method:'POST',cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
     x=x.trim();
     if(x.indexOf('OK')!==0){var y=reply(x);msg(y[0],y[1]);return}
+    mdBase={s:md.s,t:md.t,z:zkey(md.z)};drawMd();
     if(x==='OK md_live'){msg(t('md_applied'),'good');return}
     if(!confirm(t('c_md'))){msg(t('md_later'));return}
     return send('reboot').then(function(){msg(t('md_rebooting'),'good')});
@@ -914,17 +1038,34 @@ function loadMd(){
     x.split('\n').forEach(function(l){var i=l.indexOf('=');if(i<1)return;var k=l.slice(0,i),v=l.slice(i+1);
       if(k==='sensitivity')md.s=+v||0;else if(k==='tracking')md.t=+v?1:0;
       else if(k==='zones')md.z=v?v.split(';').map(function(z){return z.split(',').map(Number)}):[]});
+    mdBase={s:md.s,t:md.t,z:zkey(md.z)};
     drawMd();
   }).catch(function(){});
 }
+$('#mdreset').onclick=function(){
+  if(!mdBase)return;
+  md.s=mdBase.s;md.t=mdBase.t;md.z=mdBase.z?mdBase.z.split('_').map(function(r){return r.split('-').map(Number)}):[];
+  drawMd();
+};
 // Camera settings. Each button group edits one key; a key without a saved value shows what p2pcam runs with now.
-var CK={c:'nightcolor',n:'night',d:'day',h:'hourly',p:'person',r:'recmode',v:'volume',s:'voice',o:'osd',t:'rotate'},cam={};
-function drawCam(){document.querySelectorAll('button[data-cam]').forEach(function(b){b.classList.toggle('on',cam[b.dataset.cam]===b.dataset.v)})}
+var CK={c:'nightcolor',n:'night',d:'day',h:'hourly',p:'person',r:'recmode',v:'volume',o:'osd',t:'rotate'},cam={},camBase={};
+var BOOTK={c:1,o:1,t:1};
+function drawCam(){
+  document.querySelectorAll('button[data-cam]').forEach(function(b){b.classList.toggle('on',cam[b.dataset.cam]===b.dataset.v)});
+  var n=0,boot=0;
+  Object.keys(CK).forEach(function(s){
+    var ch=cam[s]!==camBase[s],el=document.querySelector('.set[data-key="'+s+'"]');
+    if(el)el.classList.toggle('changed',ch);
+    if(ch){n++;if(BOOTK[s]||(s==='r'&&(cam[s]==='2'||camBase[s]==='2')))boot++}
+  });
+  summary($('#camsum'),$('#camsave'),n,boot);
+}
 function loadCam(){
   fetch('webui?s=cam',{cache:'no-store'}).then(function(r){return r.text()}).then(function(x){
     var saved={},now={};
     x.split('\n').forEach(function(l){var i=l.indexOf('=');if(i<1)return;var k=l.slice(0,i),v=l.slice(i+1);if(k.indexOf('now_')===0)now[k.slice(4)]=v;else saved[k]=v});
     Object.keys(CK).forEach(function(s){var k=CK[s];cam[s]=k in saved?saved[k]:(k==='person'?'0':now[k])});
+    camBase=Object.assign({},cam);
     var na=now.hourly_switch!=='1';
     document.querySelectorAll('button[data-cam="h"],#retest').forEach(function(b){b.disabled=na});
     $('#hourly_na').hidden=!na;
@@ -932,6 +1073,7 @@ function loadCam(){
   }).catch(function(){});
 }
 document.querySelectorAll('button[data-cam]').forEach(function(b){b.onclick=function(){cam[b.dataset.cam]=b.dataset.v;drawCam()}});
+$('#camreset').onclick=function(){cam=Object.assign({},camBase);drawCam()};
 $('#retest').onclick=function(){var name=t('retest');msg(t('sending',name));send('day_retest').then(function(r){var x=reply(r);msg(x[0],x[1])},function(){msg(t('neterr',name),'bad')})};
 $('#camsave').onclick=function(){
   var v=Object.keys(CK).filter(function(s){return cam[s]!==undefined&&cam[s]!==''}).map(function(s){return s+cam[s]}).join('.');
@@ -939,6 +1081,7 @@ $('#camsave').onclick=function(){
   send('cam_save&v='+v).then(function(x){
     if(x.indexOf('OK')!==0){var y=reply(x);msg(y[0],y[1]);return}
     if(x==='OK cam_live'){msg(t('md_applied'),'good');loadCam();return}
+    camBase=Object.assign({},cam);drawCam();
     if(!confirm(t('c_cam'))){msg(t('md_later'));return}
     return send('reboot').then(function(){msg(t('md_rebooting'),'good')});
   }).catch(function(){msg(t('neterr',t('cam_name')),'bad')});

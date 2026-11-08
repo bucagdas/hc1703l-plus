@@ -101,8 +101,4 @@ if [ -n "$H" ]; then
     say "hwcfg not bound"
   fi
 fi
-# Voice prompts off: start.sh unpacks /bak/VOICE.tgz into /tmp/VOICE later; an empty file there leaves it empty.
-if [ "$(kv voice)" = 0 ] && touch /tmp/voice.empty && mount --bind /tmp/voice.empty /bak/VOICE.tgz; then
-  say "voice prompts off"
-fi
 sync
