@@ -9,6 +9,9 @@ kalır: **kendi** kameranızdan aldığınız kopya üzerinden yamalanır, kulla
 > **Durum:** Ekim 2026'dan beri yazarın kamerasında her gün kullanılıyor. **Tek** kamerada ve **tek**
 > firmware sürümünde denendi. Başlamadan önce [Uyumluluk](#uyumluluk) ve [Kurtarma](#kurtarma) bölümlerini okuyun.
 
+<p align="center"><img src="docs/panel.png" width="640" alt="HC1703L Plus kontrol paneli"><br>
+<sub>Kontrol paneli. Kamera görüntüsü bu ekran görüntüsü için bulanıklaştırıldı.</sub></p>
+
 ## Ne kazanırsınız
 
 | | Stok | Plus |

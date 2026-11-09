@@ -9,6 +9,9 @@ patched from **your own** copy of the firmware, and everything you interact with
 > **Status:** in daily use on the author's camera since October 2026. Tested on **one** camera and **one**
 > firmware build. Read [Compatibility](#compatibility) and [Recovery](#recovery) before you start.
 
+<p align="center"><img src="docs/panel.png" width="640" alt="The HC1703L Plus control panel"><br>
+<sub>The control panel. The camera picture is blurred for this screenshot.</sub></p>
+
 ## What you get
 
 | | Stock | Plus |
