@@ -6,8 +6,9 @@ A modern, privacy-first layer for the cheap Augentix **HC1703L** pan/tilt camera
 [Jalecom's hack](https://github.com/Jalecom/AJ_HC1703L_Teardown). The vendor program `p2pcam` stays in place as a closed "driver": it is
 patched from **your own** copy of the firmware, and everything you interact with runs from the SD card.
 
-> **Status:** in daily use on the author's camera since October 2026. Tested on **one** camera and **one**
-> firmware build. Read [Compatibility](#compatibility) and [Recovery](#recovery) before you start.
+> **Status:** in daily use on the author's camera since October 2026, firmware 57.0.8.0. Support for firmware
+> 57.1.2.0 is new and not yet tested on a camera. Read [Compatibility](#compatibility) and [Recovery](#recovery)
+> before you start.
 
 <p align="center"><img src="docs/panel.png" width="640" alt="The HC1703L Plus control panel"><br>
 <sub>The control panel. The camera picture is blurred for this screenshot.</sub></p>
@@ -75,8 +76,13 @@ in a row do not drop the camera to stock.
 
 ## Compatibility
 
-- Only the `p2pcam` build with sha256 `5e2dc1a15734e214…` (sensor SC1346). `build.sh` refuses anything
-  else: patch offsets differ between builds and a wrong patch can boot-loop the camera.
+- Two `p2pcam` builds (sensor SC1346). `build.sh` refuses anything else: patch offsets differ between builds and
+  a wrong patch can boot-loop the camera.
+
+  | Firmware (app) | `p2pcam` sha256 | Patched md5 | Status |
+  |---|---|---|---|
+  | 57.0.8.0 | `5e2dc1a15734e214…` | `718a2a38ad4a52c5618157c0995b2fd1` | in daily use |
+  | 57.1.2.0 | `146e7faff2f2dfd0…` | `fda4668a44d61380aadbd4a47327fa05` | ported from a user's dump, not yet tested on a camera |
 - Requires the base hack's **permanent** version (`HACKTYPE=P`, `/home/minihack.sh`) for Wi-Fi without the
   cloud, telnet, FTP and the BusyBox httpd.
 - Build host: Linux or macOS with `python3` and `squashfs-tools` (`unsquashfs`, `mksquashfs`, xz).
@@ -86,8 +92,8 @@ in a row do not drop the camera to stock.
 1. Install the base hack's permanent version as described in [Jalecom's README](https://github.com/Jalecom/AJ_HC1703L_Teardown).
    Check that telnet, FTP and `http://<camera>:8080` work.
 2. Copy `/bak/p2pcam.sqfs` from the camera to your computer (FTP).
-3. Build: `patcher/build.sh p2pcam.sqfs out/`. The patched `p2pcam` md5 must be
-   `718a2a38ad4a52c5618157c0995b2fd1`.
+3. Build: `patcher/build.sh p2pcam.sqfs out/`. The patched `p2pcam` md5 must match your firmware's line in
+   [Compatibility](#compatibility).
 4. Copy to the SD card root: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    Put `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` and `out/p2pcam.md5` into `clean/`.
    **Do not copy `debug_cmd.sh` yet.**
@@ -131,8 +137,8 @@ re-syncs it every 6 hours from the default gateway (the router), the only time s
 
 ## Known limitations
 
-- One firmware build only. Other builds need new offsets.
-- Tested on one camera.
+- Two firmware builds only. Other builds need new offsets.
+- Tested on one camera (57.0.8.0).
 - A zone change needs a reboot. Zones written to the running `p2pcam` were not picked up.
 - With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once that motion
   reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.

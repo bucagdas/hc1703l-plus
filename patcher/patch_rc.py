@@ -3,9 +3,16 @@
 # Usage: python3 -I patch_rc.py <input p2pcam (output of patch_p2pcam.py)> <output> <A|B|C|C2>
 # build.sh uses C2 (25 FPS, 2560 kbps cap). A/B/C are kept for experiments and are less tested.
 # Code VA -> file offset: va-0x10000. .data strings are addressed by file offset directly.
+# Both stock builds of patch_p2pcam.py are supported: the video code below is 57.0.8.0's; in 57.1.2.0 the whole
+# video module moved by 0x3758. The rate-control tables are found by their contents.
 import sys
 src,dst,S=sys.argv[1:4]
 b=bytearray(open(src,'rb').read())
+def at(va,n): return bytes(b[va-0x10000:va-0x10000+n])
+DELTAS=[d for d in (0,0x3758) if at(0x5fa30+d,4) in (bytes.fromhex('c4f25012'),bytes.fromhex('c4f2d012'))
+        and at(0x60184+d,2) in (bytes.fromhex('1920'),bytes.fromhex('3220'))]
+assert len(DELTAS)==1,'unknown p2pcam build: run patch_p2pcam.py first'
+V=DELTAS[0]
 SETS={ # fps, device_fps, frm_rate_o, gop, max_kbps, tex_base, tex_factor, m2s_min_qp
  'A' :(12.5,13.0,12,25,2048,20,400000,28),
  'B' :(20.0,21.0,20,40,2048,21,400000,28),
@@ -16,7 +23,7 @@ fps,dev,fro,gop,mx,tb,tf,m2s=SETS[S]
 def vimm(v):
     return {12.5:0x29,20.0:0x34,25.0:0x39}[v]
 def setb(va,mask_ok,new,why):
-    o=va-0x10000; cur=bytes(b[o:o+len(new)])
+    va+=V; o=va-0x10000; cur=bytes(b[o:o+len(new)])
     assert cur in mask_ok,(hex(va),cur.hex(),why)
     b[o:o+len(new)]=new; print('CODE %06x %s -> %s %s'%(va,cur.hex(),new.hex(),why))
 i=vimm(fps);H,L=i>>4,i&15
@@ -41,9 +48,11 @@ N='0,51,0,51,0,80,12,1000,100000,1,16,250000,24,0,0,30,2,48,35,4,0'
 D='0,51,0,51,0,70,12,10,20000,1,16,180000,24,0,0,30,2,24,35,4,0'
 n2='0,51,0,51,0,100,12,1000,100000,1,16,%d,%d,0,0,30,2,48,%d,4,0'%(tf,tb,m2s)
 d2='0,51,0,51,0,100,12,10,20000,1,16,%d,%d,0,0,30,2,24,%d,4,0'%(tf,tb,m2s)
-rep(0x381020,100,N,n2,'g_rc_param night')
-rep(0x381084,100,D,d2,'g_rc_param day')
-rep(0x3810e8,100,N,n2,'g_rc_param white light')
+Dpos=b.find(D.encode()+b'\0'); assert Dpos>0 and b.count(D.encode()+b'\0')==1,'g_rc_param day not found'
+rep(Dpos-100,100,N,n2,'g_rc_param night')
+rep(Dpos,100,D,d2,'g_rc_param day')
+rep(Dpos+100,100,N,n2,'g_rc_param white light')
 R='4,60,6,60,0,0,45,8,2,6,300000,800000,500,3000,40,48,40,40,400000,800000,500,3000,0,0,0,0,20000000,20000000,4,100,300,0,0,-1'
-rep(0x3811cc,0x80,R,'2,60,2'+R[6:],'g_rgl_qp day: I/P rgl ceiling 4/6 -> 2/2')
+Rpos=b.find(R.encode()+b'\0'); assert Rpos>0 and b.count(R.encode()+b'\0')==1,'g_rgl_qp not found'
+rep(Rpos,0x80,R,'2,60,2'+R[6:],'g_rgl_qp day: I/P rgl ceiling 4/6 -> 2/2')
 open(dst,'wb').write(b)

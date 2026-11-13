@@ -3,7 +3,8 @@
 [English](INTERNALS.md)
 
 HC1703L Plus'ın dayandığı notlar. Hepsi tek kamerada, sha256 değeri `5e2dc1a15734e214` ile başlayan
-`p2pcam` sürümünde bulundu. Adresler bu ikilideki sanal adreslerdir (dosya ofseti = VA − 0x10000).
+`p2pcam` sürümünde (firmware 57.0.8.0) bulundu. Adresler bu ikilideki sanal adreslerdir (dosya ofseti = VA − 0x10000).
+Firmware 57.1.2.0'daki karşılıkları `patcher/patch_p2pcam.py` içindeki `BUILDS` tablosunda ve `tools/mdcfg.c`'de.
 "Doğrulandı" çalışan kamerada ölçüldü demektir; geri kalanı statik analizdir.
 
 ## Platform

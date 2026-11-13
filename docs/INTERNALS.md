@@ -3,7 +3,9 @@
 [Türkçe](IC-YAPI.md)
 
 Notes behind HC1703L Plus. Everything here was found on one camera with the `p2pcam` build whose sha256
-starts with `5e2dc1a15734e214`. Addresses are virtual addresses in that binary (file offset = VA − 0x10000).
+starts with `5e2dc1a15734e214` (firmware 57.0.8.0). Addresses are virtual addresses in that binary (file offset =
+VA − 0x10000). The same sites in firmware 57.1.2.0 are listed in the `BUILDS` table of `patcher/patch_p2pcam.py` and
+in `tools/mdcfg.c`.
 "Verified" means measured on the running camera; everything else is static analysis.
 
 ## Platform

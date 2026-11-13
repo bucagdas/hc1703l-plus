@@ -4,7 +4,8 @@
 # Input : the stock /bak/p2pcam.sqfs copied from YOUR camera (we do not distribute vendor binaries).
 # Output: <outdir>/p2pcam.sqfs, p2pcam.sqfs.md5, p2pcam.md5 -> copy them to the SD card's clean/ folder.
 #
-# Only one stock build is supported (p2pcam sha256 5e2dc1a15734e214...). Any other build is refused:
+# Two stock builds are supported: firmware 57.0.8.0 (p2pcam sha256 5e2dc1a15734e214..., the author's camera) and
+# 57.1.2.0 (146e7faff2f2dfd0..., ported from a user's dump, see patch_p2pcam.py). Any other build is refused:
 # offsets differ between firmware versions and a wrong patch can boot-loop the camera.
 # Needs: python3, unsquashfs and mksquashfs (squashfs-tools 4.x with xz).
 set -euo pipefail
@@ -29,5 +30,6 @@ mksquashfs "$T/root" "$OUT/p2pcam.sqfs" -comp xz -b 131072 -noappend -no-xattrs 
 md5 "$T/b" > "$OUT/p2pcam.md5"
 md5 "$OUT/p2pcam.sqfs" > "$OUT/p2pcam.sqfs.md5"
 cp "$T/patch.log" "$OUT/patch.log"
-echo "patched p2pcam md5: $(cat "$OUT/p2pcam.md5")  (reference build: 718a2a38ad4a52c5618157c0995b2fd1)"
+echo "patched p2pcam md5: $(cat "$OUT/p2pcam.md5")"
+echo "  reference: 718a2a38ad4a52c5618157c0995b2fd1 (fw 57.0.8.0), fda4668a44d61380aadbd4a47327fa05 (fw 57.1.2.0)"
 echo "written to $OUT/ - copy p2pcam.sqfs, p2pcam.sqfs.md5 and p2pcam.md5 to <SD>/clean/"

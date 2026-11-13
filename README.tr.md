@@ -6,8 +6,9 @@ Ucuz Augentix **HC1703L** pan/tilt kamera için, [Jalecom'un hack'i](https://git
 gizliliği öne alan modern bir katman. Üreticinin `p2pcam` programı kapalı bir "sürücü" olarak yerinde
 kalır: **kendi** kameranızdan aldığınız kopya üzerinden yamalanır, kullandığınız her şey SD karttan çalışır.
 
-> **Durum:** Ekim 2026'dan beri yazarın kamerasında her gün kullanılıyor. **Tek** kamerada ve **tek**
-> firmware sürümünde denendi. Başlamadan önce [Uyumluluk](#uyumluluk) ve [Kurtarma](#kurtarma) bölümlerini okuyun.
+> **Durum:** Ekim 2026'dan beri yazarın kamerasında, firmware 57.0.8.0 ile her gün kullanılıyor. Firmware 57.1.2.0
+> desteği yeni ve henüz bir kamerada denenmedi. Başlamadan önce [Uyumluluk](#uyumluluk) ve [Kurtarma](#kurtarma)
+> bölümlerini okuyun.
 
 <p align="center"><img src="docs/panel.png" width="640" alt="HC1703L Plus kontrol paneli"><br>
 <sub>Kontrol paneli. Kamera görüntüsü bu ekran görüntüsü için bulanıklaştırıldı.</sub></p>
@@ -77,9 +78,13 @@ değiştirmek kamerayı stoğa düşürmez.
 
 ## Uyumluluk
 
-- Yalnız sha256 değeri `5e2dc1a15734e214…` olan `p2pcam` sürümü (SC1346 sensör). `build.sh` başka
-  sürümü reddeder: yama adresleri sürümden sürüme değişir ve yanlış yama kamerayı yeniden başlama
-  döngüsüne sokabilir.
+- İki `p2pcam` sürümü (SC1346 sensör). `build.sh` başka sürümü reddeder: yama adresleri sürümden sürüme
+  değişir ve yanlış yama kamerayı yeniden başlama döngüsüne sokabilir.
+
+  | Firmware (uygulama) | `p2pcam` sha256 | Yamalı md5 | Durum |
+  |---|---|---|---|
+  | 57.0.8.0 | `5e2dc1a15734e214…` | `718a2a38ad4a52c5618157c0995b2fd1` | her gün kullanılıyor |
+  | 57.1.2.0 | `146e7faff2f2dfd0…` | `fda4668a44d61380aadbd4a47327fa05` | bir kullanıcının dökümünden uyarlandı, henüz kamerada denenmedi |
 - Temel hack'in **kalıcı** sürümü gerekir (`HACKTYPE=P`, `/home/minihack.sh`): buluta gerek kalmadan
   WiFi, telnet, FTP ve BusyBox httpd ondan gelir.
 - Derleme bilgisayarı: `python3` ve `squashfs-tools` (`unsquashfs`, `mksquashfs`, xz) olan Linux ya da macOS.
@@ -89,8 +94,8 @@ değiştirmek kamerayı stoğa düşürmez.
 1. Temel hack'in kalıcı sürümünü [Jalecom'un README'sindeki](https://github.com/Jalecom/AJ_HC1703L_Teardown) gibi kurun. Telnet, FTP ve
    `http://<kamera>:8080` çalışıyor mu kontrol edin.
 2. Kameradan `/bak/p2pcam.sqfs` dosyasını bilgisayarınıza alın (FTP).
-3. Derleyin: `patcher/build.sh p2pcam.sqfs out/`. Yamalı `p2pcam` md5 değeri
-   `718a2a38ad4a52c5618157c0995b2fd1` olmalı.
+3. Derleyin: `patcher/build.sh p2pcam.sqfs out/`. Yamalı `p2pcam` md5 değeri, [Uyumluluk](#uyumluluk)
+   bölümünde sizin firmware sürümünüzün satırındakiyle aynı olmalı.
 4. SD kartın köküne kopyalayın: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` ve `out/p2pcam.md5` dosyalarını `clean/` içine koyun.
    **`debug_cmd.sh`'yi henüz kopyalamayın.**
@@ -135,8 +140,8 @@ bir varsayılan ağ geçidinden (router) eşitler; bulut engeli açıkken ulaş�
 
 ## Bilinen sınırlar
 
-- Yalnız tek firmware sürümü. Diğer sürümler için yeni adresler gerekir.
-- Tek kamerada denendi.
+- Yalnız iki firmware sürümü. Diğer sürümler için yeni adresler gerekir.
+- Tek kamerada denendi (57.0.8.0).
 - Bölge değişikliği için yeniden başlatma gerekir. Çalışan `p2pcam`'e yazılan bölgeler okunmadı.
 - Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ
   çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.

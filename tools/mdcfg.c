@@ -52,25 +52,36 @@
 #define MAX_ZONES 25
 #define EVENT_OFF 2
 
-/* Addresses in the supported p2pcam build. live() refuses to write unless the first two check out. */
-#define VA_SIG    0x22a484u  /* "support_ymv" in the read-only data */
-#define VA_DEVPTR 0x39ddc0u  /* pointer to the RAM copy of devParam.dat, same layout as the file */
-#define VA_THRESH 0x3f1b0cu  /* moving blocks needed for an event */
-/* Nightly restart (stock FUN_00042030, checked every 6 s): after about 22 h of uptime, between 02:00 and 04:00
- * local time, once 30 s pass with no recording. VA_AUTOREBOOT is the hwcfg "auto_reboot" field (default 1), read on
- * every check and nowhere else. VA_REBOOT_AT is the chosen time in seconds after 02:00, picked at random once at
- * start-up (0..7199). */
-#define VA_AUTOREBOOT 0x3a4bf8u
-#define VA_REBOOT_AT  0x3a55a8u
-/* Day/night (icrCtrlThd re-reads both on every poll): night when the exposure score is below -AGC_NIGHT,
- * back to day when it is above AGC_DAY while the IR light is on. */
-#define VA_AGC_NIGHT  0x3a4c54u
-#define VA_AGC_DAY    0x3a4c5cu
-#define VA_NOPROBE    0x3a52c4u  /* non-zero: patch 17 skips the hourly forced-day probe */
-#define VA_PERSON     0x3a1418u  /* float person score threshold, set once at start-up from motion_level */
-#define VA_OSDPOS     0x39ff78u  /* time stamp corner in use: -1 off, 0..3 */
-#define VA_VOICE_VOL  0x3a4c40u  /* hwcfg voice_volume, used when devParam 0x3bc is 0 */
-#define VA_MIC_VALUE  0x3a4cacu  /* hwcfg mic_value, used when devParam 0x3c0 is 0 */
+/* Addresses in the two supported p2pcam builds (see patcher/patch_p2pcam.py). open_mem() picks the build whose
+ * signature string and devParam pointer check out; nothing is written to memory otherwise.
+ *   sig        "support_ymv" in the read-only data
+ *   devptr     pointer to the RAM copy of devParam.dat, same layout as the file
+ *   thresh     moving blocks needed for an event
+ *   autoreboot nightly restart switch (stock FUN_00042030 in 57.0.8.0, checked every 6 s): after about 22 h of uptime,
+ *              between 02:00 and 04:00 local time, once 30 s pass with no recording. The hwcfg "auto_reboot" field
+ *              (default 1), read on every check and nowhere else.
+ *   reboot_at  the chosen time in seconds after 02:00, picked at random once at start-up (0..7199)
+ *   agc_night, agc_day   day/night (icrCtrlThd re-reads both on every poll): night when the exposure score is below
+ *              -agc_night, back to day when it is above agc_day while the IR light is on
+ *   noprobe    non-zero: patch 17 skips the hourly forced-day probe (hwcfg only_wireless_bind)
+ *   person     float person score threshold, set once at start-up from motion_level
+ *   osdpos     time stamp corner in use: -1 off, 0..3
+ *   voice_vol  hwcfg voice_volume, used when devParam 0x3bc is 0
+ *   mic_value  hwcfg mic_value, used when devParam 0x3c0 is 0
+ *   probe_at   patch 17 call site, and probe_bl its patched bytes */
+struct build {
+    const char *fw;
+    uint32_t sig, devptr, thresh, autoreboot, reboot_at, agc_night, agc_day, noprobe, person, osdpos, voice_vol, mic_value,
+             probe_at;
+    uint8_t probe_bl[4];
+};
+static const struct build BUILDS[] = {
+    { "57.0.8.0", 0x22a484, 0x39ddc0, 0x3f1b0c, 0x3a4bf8, 0x3a55a8, 0x3a4c54, 0x3a4c5c, 0x3a52c4, 0x3a1418, 0x39ff78,
+      0x3a4c40, 0x3a4cac, 0x37156, { 0xdc, 0xf0, 0xd3, 0xfd } },
+    { "57.1.2.0", 0x278860, 0x3f9e58, 0x44e494, 0x400eb0, 0x4018f0, 0x400f0c, 0x400f14, 0x40157c, 0x3fd4f0, 0x3fc050,
+      0x400ef8, 0x400f64, 0x39306, { 0x30, 0xf1, 0xbd, 0xfb } },
+};
+static const struct build *K;   /* the build open_mem() found */
 
 static uint8_t b[FILE_SIZE];
 
@@ -173,21 +184,24 @@ static int mem_put(int fd, uint32_t va, int32_t v)
     return pwrite(fd, &v, 4, va) == 4 ? 0 : -1;
 }
 
-/* Open the memory of p2pcam and prove it is the supported build. Returns the fd, or -1. */
+/* Open the memory of p2pcam and prove it is a supported build. Returns the fd, or -1. */
 static int open_mem(int pid, int flags, uint32_t *dev)
 {
     char path[32], sig[12];
-    uint32_t magic = 0;
     snprintf(path, sizeof path, "/proc/%d/mem", pid);
     int fd = open(path, flags);
     if (fd < 0) { perror(path); return -1; }
-    if (pread(fd, sig, sizeof sig, VA_SIG) != sizeof sig || memcmp(sig, "support_ymv", sizeof sig) ||
-        pread(fd, dev, 4, VA_DEVPTR) != 4 || pread(fd, &magic, 4, *dev) != 4 || magic != MAGIC) {
-        fprintf(stderr, "mdcfg: unsupported p2pcam build\n");
-        close(fd);
-        return -1;
+    for (size_t i = 0; i < sizeof BUILDS / sizeof BUILDS[0]; i++) {
+        uint32_t magic = 0;
+        if (pread(fd, sig, sizeof sig, BUILDS[i].sig) == sizeof sig && !memcmp(sig, "support_ymv", sizeof sig) &&
+            pread(fd, dev, 4, BUILDS[i].devptr) == 4 && pread(fd, &magic, 4, *dev) == 4 && magic == MAGIC) {
+            K = &BUILDS[i];
+            return fd;
+        }
     }
-    return fd;
+    fprintf(stderr, "mdcfg: unsupported p2pcam build\n");
+    close(fd);
+    return -1;
 }
 
 static int image(int pid)
@@ -209,8 +223,8 @@ static int reboot_cfg(int pid, int set)
     uint32_t dev = 0, on = 0, at = 0;
     int fd = open_mem(pid, set < 0 ? O_RDONLY : O_RDWR, &dev);
     if (fd < 0) return 1;
-    int ok = pread(fd, &on, 4, VA_AUTOREBOOT) == 4 && pread(fd, &at, 4, VA_REBOOT_AT) == 4 && on <= 1 && at < 7200;
-    if (ok && set >= 0) ok = mem_put(fd, VA_AUTOREBOOT, set) == 0 && pread(fd, &on, 4, VA_AUTOREBOOT) == 4 && on == (uint32_t)set;
+    int ok = pread(fd, &on, 4, K->autoreboot) == 4 && pread(fd, &at, 4, K->reboot_at) == 4 && on <= 1 && at < 7200;
+    if (ok && set >= 0) ok = mem_put(fd, K->autoreboot, set) == 0 && pread(fd, &on, 4, K->autoreboot) == 4 && on == (uint32_t)set;
     close(fd);
     if (!ok) { fprintf(stderr, "mdcfg: nightly restart not readable or not written\n"); return 1; }
     printf("%u %u\n", on, at);
@@ -222,23 +236,22 @@ static int rd32m(int fd, uint32_t va, int32_t *v) { return pread(fd, v, 4, va) =
 /* Patch 17 in place? Without it the hourly flag has no effect. */
 static int probe_patched(int fd)
 {
-    static const uint8_t bl[4] = { 0xdc, 0xf0, 0xd3, 0xfd };
     uint8_t c[4];
-    return pread(fd, c, 4, 0x37156) == 4 && !memcmp(c, bl, 4);
+    return pread(fd, c, 4, K->probe_at) == 4 && !memcmp(c, K->probe_bl, 4);
 }
 
-/* What p2pcam runs with now. Fails if any value looks wrong for the supported build. */
+/* What p2pcam runs with now. Fails if any value looks wrong for the build. */
 struct now { int32_t thresh, track, night, day, noprobe, recmode, volume, voicevol, mic, micvalue, nightcolor, osd; float person; uint8_t flip; };
 
 static int read_now(int fd, uint32_t dev, struct now *n)
 {
-    if (rd32m(fd, VA_THRESH, &n->thresh) || rd32m(fd, dev + OFF_TRACK, &n->track) ||
-        rd32m(fd, VA_AGC_NIGHT, &n->night) || rd32m(fd, VA_AGC_DAY, &n->day) ||
-        rd32m(fd, VA_NOPROBE, &n->noprobe) || rd32m(fd, dev + OFF_RECMODE, &n->recmode) ||
-        rd32m(fd, dev + OFF_VOLUME, &n->volume) || rd32m(fd, VA_VOICE_VOL, &n->voicevol) ||
-        rd32m(fd, dev + OFF_MIC, &n->mic) || rd32m(fd, VA_MIC_VALUE, &n->micvalue) ||
-        rd32m(fd, dev + OFF_NIGHTCOLOR, &n->nightcolor) || rd32m(fd, VA_OSDPOS, &n->osd) ||
-        pread(fd, &n->person, 4, VA_PERSON) != 4 || pread(fd, &n->flip, 1, dev + OFF_FLIP) != 1)
+    if (rd32m(fd, K->thresh, &n->thresh) || rd32m(fd, dev + OFF_TRACK, &n->track) ||
+        rd32m(fd, K->agc_night, &n->night) || rd32m(fd, K->agc_day, &n->day) ||
+        rd32m(fd, K->noprobe, &n->noprobe) || rd32m(fd, dev + OFF_RECMODE, &n->recmode) ||
+        rd32m(fd, dev + OFF_VOLUME, &n->volume) || rd32m(fd, K->voice_vol, &n->voicevol) ||
+        rd32m(fd, dev + OFF_MIC, &n->mic) || rd32m(fd, K->mic_value, &n->micvalue) ||
+        rd32m(fd, dev + OFF_NIGHTCOLOR, &n->nightcolor) || rd32m(fd, K->osdpos, &n->osd) ||
+        pread(fd, &n->person, 4, K->person) != 4 || pread(fd, &n->flip, 1, dev + OFF_FLIP) != 1)
         return -1;
     if (n->night >= 0 || n->night < -100000 || n->day <= 0 || n->day > 1000000 || (uint32_t)n->noprobe > 1 ||
         (uint32_t)n->recmode > 3 || (uint32_t)n->volume > 100 || (uint32_t)n->mic > 100 || (uint32_t)n->nightcolor > 2 ||
@@ -308,16 +321,16 @@ static int live(int pid, const char *conf)
     if (fd < 0) return 1;
     if (read_now(fd, dev, &n)) { close(fd); fprintf(stderr, "mdcfg: unexpected values\n"); return 1; }
     int bad = 0;
-    if (sens >= 0) bad |= mem_put(fd, VA_THRESH, thresh[sens]);
+    if (sens >= 0) bad |= mem_put(fd, K->thresh, thresh[sens]);
     if (track >= 0) bad |= mem_put(fd, dev + OFF_TRACK, track);
-    if (night > 0) bad |= mem_put(fd, VA_AGC_NIGHT, -night);
-    if (day > 0) bad |= mem_put(fd, VA_AGC_DAY, day);
-    if (hourly >= 0 && probe_patched(fd)) bad |= mem_put(fd, VA_NOPROBE, !hourly);
+    if (night > 0) bad |= mem_put(fd, K->agc_night, -night);
+    if (day > 0) bad |= mem_put(fd, K->agc_day, day);
+    if (hourly >= 0 && probe_patched(fd)) bad |= mem_put(fd, K->noprobe, !hourly);
     if (person > 0 || (person <= 0 && sens >= 0)) {   /* no person key: follow sensitivity, as stock does at boot */
         float p = person > 0 ? person / 100.0f : pmap[sens];
         int32_t raw;
         memcpy(&raw, &p, 4);
-        bad |= mem_put(fd, VA_PERSON, raw);
+        bad |= mem_put(fd, K->person, raw);
     }
     if (recmode >= 0 && recmode < 2 && n.recmode < 2) bad |= mem_put(fd, dev + OFF_RECMODE, recmode);
     if (volume > 0) bad |= mem_put(fd, dev + OFF_VOLUME, volume * 10);
