@@ -20,7 +20,8 @@ kalır: **kendi** kameranızdan aldığınız kopya üzerinden yamalanır, kulla
 | Çözünürlük | 1920×1080, 1280×720 sensörden büyütülmüş | gerçek 1280×720 |
 | Kare hızı | gündüz 12,5, gece 8 | gündüz 25, gece 12,5 |
 | Video bit hızı tavanı | 1 Mbps | 2,56 Mbps |
-| Boş RAM | ~14 MB | ~22 MB |
+| Hareket klibinin başlangıcı | olaydan 1–4 sn önce | olaydan yaklaşık 10 sn önce |
+| Boş RAM | ~14 MB | ~19 MB (3 MB'ı daha uzun ön kayda gidiyor) |
 | Bulut | Tange/iCam365 SDK, HTTPDNS, ters `teltun` tüneli | SDK hiç başlamaz, uç noktalar loopback'e, tünel komutu bozuk, tüm genel IP'ler reddedilir |
 | p2pcam'in LAN'a açık servisleri | 80, 6670, 8001, 20202, 554 üzerinden CTP/HTTP | yalnız 554'te RTSP |
 
@@ -83,8 +84,8 @@ değiştirmek kamerayı stoğa düşürmez.
 
   | Firmware (uygulama) | `p2pcam` sha256 | Yamalı md5 | Durum |
   |---|---|---|---|
-  | 57.0.8.0 | `5e2dc1a15734e214…` | `718a2a38ad4a52c5618157c0995b2fd1` | her gün kullanılıyor |
-  | 57.1.2.0 | `146e7faff2f2dfd0…` | `fda4668a44d61380aadbd4a47327fa05` | bir kullanıcının dökümünden uyarlandı, henüz kamerada denenmedi |
+  | 57.0.8.0 | `5e2dc1a15734e214…` | `172468cf2bc865fb614e6ab55f8369b1` | her gün kullanılıyor |
+  | 57.1.2.0 | `146e7faff2f2dfd0…` | `0f93e2034ed5376f0c342c134895d1d2` | bir kullanıcının dökümünden uyarlandı, henüz kamerada denenmedi |
 - Temel hack'in **kalıcı** sürümü gerekir (`HACKTYPE=P`, `/home/minihack.sh`): buluta gerek kalmadan
   WiFi, telnet, FTP ve BusyBox httpd ondan gelir.
 - Derleme bilgisayarı: `python3` ve `squashfs-tools` (`unsquashfs`, `mksquashfs`, xz) olan Linux ya da macOS.

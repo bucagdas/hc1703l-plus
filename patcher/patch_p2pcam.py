@@ -37,7 +37,9 @@ BUILDS={
     ymv=0x19bae,
     reboot_time=((0x30be6,'adf178fe'),(0x30fe0,'adf17bfc')),
     noprobe_flag=0x3a52c4,
-    ota=[]),
+    ota=[],
+    prerec=0x1d6c08, rec_ch=0x427884, ring_first=0x1dac00, ring_next=0x1dac82, recbuf=0x3a16c,
+    prerec_old='fb6c7b6547f68403c0f242037a68e02101fb02f213441c331b68002b1bd047f68403c0f242037a68e02101fb02f213440c331b6803f00803002b0cd13b6d002b09d0fb6c9b68ba6cd31a41f28732934201d83b6d7b65'),
 '146e7faff2f2dfd0':dict(fw='57.1.2.0',
     chazhi=(0x1ad82,'c4f86c33'),
     strings=[(0x37f82d,'203.107.1.1'),(0x37f83d,'203.107.1.33'),(0x37f84d,'203.107.1.34'),(0x37f85d,'203.107.1.35'),
@@ -63,7 +65,9 @@ BUILDS={
     ymv=0x1a18e,
     reboot_time=((0x3218a,'faf114f8'),(0x32584,'f9f117fe')),
     noprobe_flag=0x40157c,
-    ota=[(0x379749,'http://ihome-ota-service.tange365.com/'),(0x379770,'http://ihome-ota-service.test.tange365.com/')]),
+    ota=[(0x379749,'http://ihome-ota-service.tange365.com/'),(0x379770,'http://ihome-ota-service.test.tange365.com/')],
+    prerec=0x22458e, rec_ch=0x485104, ring_first=0x228548, ring_next=0x2285ca, recbuf=0x3c4c4,
+    prerec_old='fb6c7b6545f20413c0f248037a68e02101fb02f213441c331b68002b1bd045f20413c0f248037a68e02101fb02f213440c331b6803f00803002b0cd13b6d002b09d0fb6c9b68ba6cd31a41f28732934201d83b6d7b65'),
 }
 H=hashlib.sha256(b).hexdigest()
 assert H[:16] in BUILDS,'not a supported stock p2pcam (sha256 %s...); known builds: %s'%(H[:16],', '.join(
@@ -86,6 +90,8 @@ def _bl(at,to,x):
     S=(d>>24)&1; i1=(d>>23)&1; i2=(d>>22)&1; j1=(1-i1)^S; j2=(1-i2)^S
     return struct.pack('<HH',0xf000|S<<10|((d>>12)&0x3ff),(0xc000 if x else 0xd000)|j1<<13|j2<<11|((d>>1)&0x7ff))
 def bl(at,to): return _bl(at,to,False)          # Thumb -> Thumb
+def bw(at,to):                                   # b.w (Thumb -> Thumb, no link)
+    x=bytearray(bl(at,to)); x[3]&=~0x40; return bytes(x)
 def blx(at,to): assert not to&3; return _bl(at,to,True)   # Thumb -> ARM (PLT)
 def _mov(op,rd,v): return struct.pack('<HH',op|((v>>11)&1)<<10|(v>>12)&15,((v>>8)&7)<<12|rd<<8|v&0xff)
 def movw(rd,v): return _mov(0xf240,rd,v&0xffff)
@@ -161,5 +167,13 @@ code(DAY_PROBE,h(A['tange_old'][2]),h('fb68043b')+movw(2,A['noprobe_flag'])+movt
 code(A['probe_call'],h('fb68043b'),bl(A['probe_call'],DAY_PROBE),'isImageNeedForceToDay hour check -> bl day_probe')
 # 18) Sub stream (640x360) VBR cap 384 -> 768 kbps
 code(0x5fe6e+V,h('4ff4c073'),h('4ff44073'),'sub stream max_bit_rate 0x180->0x300')
+# 19) Longer pre-recording for motion events (see asm/prerec.S): start at the oldest keyframe at most 10 s before
+#     the newest frame instead of the newest one (1-4 s). 20) gives the ring buffer room for 10 s at full bit rate.
+P=A['prerec']
+code(P,h(A['prerec_old']),h('fb6c7b65')+movw(3,A['rec_ch'])+movt(3,A['rec_ch'])+h('7a68e02101fb0233da69dab1da68120718d4386b')
+     +bl(P+0x20,A['ring_first'])+h('a0b1c36863b14368012b02d0033b0a2b06d88368ba6cd21a42f210718a4204d90146386b')
+     +bl(P+0x48,A['ring_next'])+h('eae77865')+bw(P+0x50,P+86)+h('00bf'),'event recording: start at the oldest keyframe of the last 10 s')
+# 20) SD record ring buffer 1 MiB -> 4 MiB (InitRecord's only argument)
+code(A['recbuf'],h('4ff48010'),h('4ff48000'),'record ring buffer 0x100000 -> 0x400000')
 open(dst,'wb').write(b)
 print('sha256',hashlib.sha256(b).hexdigest())

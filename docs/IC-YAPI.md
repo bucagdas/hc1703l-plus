@@ -49,6 +49,8 @@ Plus, 1. adımda `/bak/p2pcam.sqfs` ve `/bak/sensor.sh` üzerine RAM kopyaları 
 | 16 | `0x30be6`, `0x30fe0` | buluta kayıtlı kamerada `/home/reboot.time` flash'a 10 dakikada bir yazılıyordu; zamanlayıcı kaldı, yazma kalktı. Yeniden başlatırken yapılan yazma duruyor, böylece sıcak yeniden başlatmada saat korunur |
 | 17 | `0x37156` + `0x113d00` | `day_probe`: saat başı zorunlu gündüz denemesi (04:00–16:59) için anahtar. Bayrak: hwcfg alanı `0x3a52c4` (anahtar `only_wireless_bind`, üretici kullanmıyor) |
 | 18 | `0x5fe6e` | alt akış (640×360) VBR tavanı 384 → 768 kbps |
+| 19 | `0x1d6c08` | olay kaydı en yeni anahtar kare yerine, en yeni kareden en çok 10 sn eski olan en eski anahtar kareden başlar (`asm/prerec.S`). Doğrulandı: klipler olaydan 9 sn önce başlıyor, önceden 1–3 sn |
+| 20 | `0x3a16c` | SD kayıt halka tamponu 1 MiB → 4 MiB, tam bit hızında 10 sn sığsın diye |
 
 `bind_lo`, `req_gate` ve `day_probe`, 9. yamadan sonra ölü kod olan Tange komut işleyicisi alanında durur. Yerel
 üretici API'si (`http://127.0.0.1:8001/...`; `httpclt`, panel ve `mo.sh` kullanır) çalışmaya devam eder.
@@ -117,6 +119,8 @@ açılışta `/bak`'a taşır; bu bir flash yazımıdır, Plus bind mount ile bu
 Klip nasıl başlar: olay iş parçacığı (`0x340e4`) hareket olaylarını alır. `support_mdzone` açıkken bölgeyle
 kesişmeyen olay atılır (`0x33a24`), takip açıksa bu denetim atlanır. Geçen olay `FUN_00033218(1)`'i çağırır, o da
 30 sn'lik olay kaydını başlatır (`FUN_001d5a9e(0,2,0x1e)`). Bölge sayısı −1 bütün kare demektir.
+Kaydedici (libmyRecord) ilk kareleri son karelerin tutulduğu bir halka tampondan alır. Stok sürüm en yeni anahtar
+kareden, olayda bir öncekinden başlar; bu yüzden klip olaydan yalnız 1–4 sn önce başlıyordu (yama 19–20).
 
 Tek bölgeyle yürüyüş testi: bölge dışında dakikalarca hareket eden kişi klip üretmedi, bölgeye girince saniyeler
 içinde klip başladı (iki kez). Girmeden önce `0x33a24`'e hiç olay ulaşmamıştı (ilk çağrı bayrağı `0x3a86a4` set

@@ -50,6 +50,8 @@ Plus binds RAM copies over `/bak/p2pcam.sqfs` and `/bak/sensor.sh` from step 1, 
 | 16 | `0x30be6`, `0x30fe0` | `/home/reboot.time` was rewritten on flash every 10 min on a cloud-registered camera; the timer stays, the write is gone. The write on reboot stays, so a warm reboot keeps the time |
 | 17 | `0x37156` + `0x113d00` | `day_probe`: switch for the hourly forced-day probe (04:00–16:59). Flag: hwcfg field `0x3a52c4` (key `only_wireless_bind`, unused by the vendor) |
 | 18 | `0x5fe6e` | sub stream (640×360) VBR cap 384 → 768 kbps |
+| 19 | `0x1d6c08` | event recordings start at the oldest keyframe at most 10 s before the newest frame, instead of the newest keyframe (`asm/prerec.S`). Verified: clips start 9 s before the event, was 1–3 s |
+| 20 | `0x3a16c` | SD record ring buffer 1 MiB → 4 MiB, so it holds 10 s at full bit rate |
 
 `bind_lo`, `req_gate` and `day_probe` live in the Tange command-handler area, which is dead code once patch 9 is in.
 The local vendor API (`http://127.0.0.1:8001/...`, used by `httpclt`, the panel and `mo.sh`) keeps working.
@@ -119,6 +121,8 @@ boot, which is a flash write; Plus avoids that with a bind mount.
 How a clip starts: the event thread (`0x340e4`) receives motion events; with `support_mdzone` on, an event that
 does not overlap a zone is dropped (`0x33a24`) unless tracking is on. A surviving event calls `FUN_00033218(1)`,
 which starts a 30 s event recording (`FUN_001d5a9e(0,2,0x1e)`). Zone count −1 means the whole frame.
+The recorder (libmyRecord) takes the first frames from a ring buffer of recent frames; stock starts at the newest
+keyframe, or the one before it for an event, so a clip used to begin only 1–4 s before the event (patches 19–20).
 
 Walk test with one zone: a person moving outside the zone for minutes produced no clip, and a clip started within
 seconds of entering it, twice. Before entering, not a single event had reached `0x33a24` (its first-call flag

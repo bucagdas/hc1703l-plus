@@ -20,7 +20,8 @@ patched from **your own** copy of the firmware, and everything you interact with
 | Resolution | 1920×1080, upscaled from a 1280×720 sensor | native 1280×720 |
 | Frame rate | day 12.5, night 8 | day 25, night 12.5 |
 | Video bitrate cap | 1 Mbps | 2.56 Mbps |
-| Free RAM | ~14 MB | ~22 MB |
+| Motion clip starts | 1–4 s before the event | about 10 s before the event |
+| Free RAM | ~14 MB | ~19 MB (3 MB more go to the longer pre-recording) |
 | Cloud | Tange/iCam365 SDK, HTTPDNS, reverse `teltun` tunnel | SDK never started, endpoints → loopback, tunnel command broken, all public IPs rejected |
 | p2pcam services on the LAN | 80, 6670, 8001, 20202, CTP/HTTP over 554 | RTSP on 554 only |
 
@@ -81,8 +82,8 @@ in a row do not drop the camera to stock.
 
   | Firmware (app) | `p2pcam` sha256 | Patched md5 | Status |
   |---|---|---|---|
-  | 57.0.8.0 | `5e2dc1a15734e214…` | `718a2a38ad4a52c5618157c0995b2fd1` | in daily use |
-  | 57.1.2.0 | `146e7faff2f2dfd0…` | `fda4668a44d61380aadbd4a47327fa05` | ported from a user's dump, not yet tested on a camera |
+  | 57.0.8.0 | `5e2dc1a15734e214…` | `172468cf2bc865fb614e6ab55f8369b1` | in daily use |
+  | 57.1.2.0 | `146e7faff2f2dfd0…` | `0f93e2034ed5376f0c342c134895d1d2` | ported from a user's dump, not yet tested on a camera |
 - Requires the base hack's **permanent** version (`HACKTYPE=P`, `/home/minihack.sh`) for Wi-Fi without the
   cloud, telnet, FTP and the BusyBox httpd.
 - Build host: Linux or macOS with `python3` and `squashfs-tools` (`unsquashfs`, `mksquashfs`, xz).
