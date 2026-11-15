@@ -6,8 +6,8 @@ A modern, privacy-first layer for the cheap Augentix **HC1703L** pan/tilt camera
 [Jalecom's hack](https://github.com/Jalecom/AJ_HC1703L_Teardown). The vendor program `p2pcam` stays in place as a closed "driver": it is
 patched from **your own** copy of the firmware, and everything you interact with runs from the SD card.
 
-> **Status:** in daily use on the author's camera since October 2026, firmware 57.0.8.0. Support for firmware
-> 57.1.2.0 is new and not yet tested on a camera. Read [Compatibility](#compatibility) and [Recovery](#recovery)
+> **Status:** in daily use on the author's camera since October 2026, firmware 57.0.8.0. Firmware
+> 57.1.2.0 was ported from a user's files and tested on that user's camera. Read [Compatibility](#compatibility) and [Recovery](#recovery)
 > before you start.
 
 <p align="center"><img src="docs/panel.png" width="640" alt="The HC1703L Plus control panel"><br>
@@ -83,7 +83,7 @@ in a row do not drop the camera to stock.
   | Firmware (app) | `p2pcam` sha256 | Patched md5 | Status |
   |---|---|---|---|
   | 57.0.8.0 | `5e2dc1a15734e214…` | `172468cf2bc865fb614e6ab55f8369b1` | in daily use |
-  | 57.1.2.0 | `146e7faff2f2dfd0…` | `0f93e2034ed5376f0c342c134895d1d2` | ported from a user's dump, not yet tested on a camera |
+  | 57.1.2.0 | `146e7faff2f2dfd0…` | `0f93e2034ed5376f0c342c134895d1d2` | tested on a user's camera |
 - Requires the base hack's **permanent** version (`HACKTYPE=P`, `/home/minihack.sh`) for Wi-Fi without the
   cloud, telnet, FTP and the BusyBox httpd.
 - Build host: Linux or macOS with `python3` and `squashfs-tools` (`unsquashfs`, `mksquashfs`, xz).
@@ -98,7 +98,9 @@ in a row do not drop the camera to stock.
    [Compatibility](#compatibility).
 4. Copy to the SD card root: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    Put `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` and `out/p2pcam.md5` into `clean/`.
-   **Do not copy `debug_cmd.sh` yet.**
+   **Do not copy `debug_cmd.sh` yet.** If you copy over FTP, use binary mode: text mode damages the programs in
+   `clean/bin/` and they stop with "Illegal instruction". `md5sum clean/bin/*` on the camera should match
+   `md5sum sdcard/clean/bin/*` on your computer.
 5. Boot the camera, then over telnet: `sh /tmp/mnt/mmc01/0/clean/prepare.sh`
    It builds `sensor.sh` and `sensor_day.ini` from your camera's own files (no vendor files are shipped).
 6. Arm the loader: `cp /tmp/mnt/mmc01/0/clean/debug_cmd.sh /tmp/mnt/mmc01/0/; sync; reboot`
@@ -150,7 +152,7 @@ flash; the choice is kept in `clean/clock.conf`.
 ## Known limitations
 
 - Two firmware builds only. Other builds need new offsets.
-- Tested on one camera (57.0.8.0).
+- Tested on two cameras: the author's (57.0.8.0) and a user's (57.1.2.0).
 - A zone change needs a reboot. Zones written to the running `p2pcam` were not picked up.
 - With tracking on, all motion is recorded, but the camera only turns for motion inside a zone, once that motion
   reaches the left or right quarter of the frame. For tracking, keep the whole frame selected.

@@ -7,7 +7,7 @@ gizliliği öne alan modern bir katman. Üreticinin `p2pcam` programı kapalı b
 kalır: **kendi** kameranızdan aldığınız kopya üzerinden yamalanır, kullandığınız her şey SD karttan çalışır.
 
 > **Durum:** Ekim 2026'dan beri yazarın kamerasında, firmware 57.0.8.0 ile her gün kullanılıyor. Firmware 57.1.2.0
-> desteği yeni ve henüz bir kamerada denenmedi. Başlamadan önce [Uyumluluk](#uyumluluk) ve [Kurtarma](#kurtarma)
+> desteği bir kullanıcının dosyalarından uyarlandı ve o kullanıcının kamerasında denendi. Başlamadan önce [Uyumluluk](#uyumluluk) ve [Kurtarma](#kurtarma)
 > bölümlerini okuyun.
 
 <p align="center"><img src="docs/panel.png" width="640" alt="HC1703L Plus kontrol paneli"><br>
@@ -85,7 +85,7 @@ değiştirmek kamerayı stoğa düşürmez.
   | Firmware (uygulama) | `p2pcam` sha256 | Yamalı md5 | Durum |
   |---|---|---|---|
   | 57.0.8.0 | `5e2dc1a15734e214…` | `172468cf2bc865fb614e6ab55f8369b1` | her gün kullanılıyor |
-  | 57.1.2.0 | `146e7faff2f2dfd0…` | `0f93e2034ed5376f0c342c134895d1d2` | bir kullanıcının dökümünden uyarlandı, henüz kamerada denenmedi |
+  | 57.1.2.0 | `146e7faff2f2dfd0…` | `0f93e2034ed5376f0c342c134895d1d2` | bir kullanıcının kamerasında denendi |
 - Temel hack'in **kalıcı** sürümü gerekir (`HACKTYPE=P`, `/home/minihack.sh`): buluta gerek kalmadan
   WiFi, telnet, FTP ve BusyBox httpd ondan gelir.
 - Derleme bilgisayarı: `python3` ve `squashfs-tools` (`unsquashfs`, `mksquashfs`, xz) olan Linux ya da macOS.
@@ -100,7 +100,9 @@ değiştirmek kamerayı stoğa düşürmez.
    bölümünde sizin firmware sürümünüzün satırındakiyle aynı olmalı.
 4. SD kartın köküne kopyalayın: `sdcard/clean/`, `sdcard/motion/`, `sdcard/mo.sh`.
    `out/p2pcam.sqfs`, `out/p2pcam.sqfs.md5` ve `out/p2pcam.md5` dosyalarını `clean/` içine koyun.
-   **`debug_cmd.sh`'yi henüz kopyalamayın.**
+   **`debug_cmd.sh`'yi henüz kopyalamayın.** FTP ile kopyalıyorsanız binary kipini kullanın: metin kipi
+   `clean/bin/` içindeki programları bozar ve programlar "Illegal instruction" hatasıyla durur. Kameradaki
+   `md5sum clean/bin/*` çıktısı, bilgisayarınızdaki `md5sum sdcard/clean/bin/*` çıktısıyla aynı olmalı.
 5. Kamerayı açın, telnet ile: `sh /tmp/mnt/mmc01/0/clean/prepare.sh`
    Bu betik `sensor.sh` ve `sensor_day.ini` dosyalarını kameranızın kendi dosyalarından üretir;
    üreticiye ait hiçbir dosya dağıtılmaz.
@@ -154,7 +156,7 @@ başlatmadan sonra saat 1970'ten başlar. Plus saati iki yoldan biriyle ayarlar;
 ## Bilinen sınırlar
 
 - Yalnız iki firmware sürümü. Diğer sürümler için yeni adresler gerekir.
-- Tek kamerada denendi (57.0.8.0).
+- İki kamerada denendi: yazarınki (57.0.8.0) ve bir kullanıcınınki (57.1.2.0).
 - Bölge değişikliği için yeniden başlatma gerekir. Çalışan `p2pcam`'e yazılan bölgeler okunmadı.
 - Takip açıkken bütün hareket kaydedilir, ama kamera yalnız bölge içindeki hareket görüntünün sol ya da sağ
   çeyreğine ulaşınca döner. Takip için bütün kareyi seçili bırakın.
