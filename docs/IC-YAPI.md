@@ -226,7 +226,8 @@ kullanır.
 
 Ayrıca her açılışta: `devParam.dat(_bak)`, `extraParam.dat(_bak)` ve `osdParam.dat(_bak)` RAM kopyalarıdır, çünkü
 üreticinin her kaydı `_bak` dosyasını da yeniden yazar. `plus.sh` stok fabrika test döngüsü `auto_test.sh`'i
-durdurur ve `clock.sh`'yi başlatır (6 saatte bir varsayılan ağ geçidinden NTP).
+durdurur ve `clock.sh`'yi başlatır (açılışta, sonra 6 saatte bir varsayılan ağ geçidinden NTP; `clean/clock.conf`
+`clock=manual` ise atlanır).
 
 ## Ses
 

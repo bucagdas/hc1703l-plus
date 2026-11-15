@@ -3,7 +3,7 @@
 # Event = motion clip (+ the snapshot taken by mo.sh, paired through the relative path in motion/mo_*.clip).
 # Endpoints:
 #   GET  gal                         page (static; data is fetched by JS)
-#   GET  gal?s=list[&d=DAY]          status + days + events (text, | separated)
+#   GET  gal?s=list[&d=DAY]          status + days + events (text, | separated), and the control panel's port
 #   GET  gal?dl=1&d=&h=&f=           download a clip (the player uses this too)
 #   POST gal?arm=0|1                 motion e-mail switch: writes <SD>/armed ("1"/"0") for an external mailer
 #   POST gal?del=1&d=&h=&f=&p=       delete an event (clip and/or snapshot+clip link)
@@ -105,6 +105,8 @@ list() {
 if [ "$s" = list ]; then
   text
   if [ -n "$d" ]; then list 100000; else list 48; fi
+  # The base hack starts the panel's web server on the first free port of 80, 8080 and 8090.
+  ps | awk '/[h]ttpd/ && /\/tmp\/hack\/www/ {for(i=1;i<NF;i++) if($i=="-p"){print "panel|" $(i+1); exit}}'
   exit 0
 fi
 
@@ -298,11 +300,13 @@ function hms(f){return f.slice(0,2)+':'+f.slice(2,4)+':'+f.slice(4,6)}
 function state(s,c){var m=$('#state');m.textContent=s;m.className=c||''}
 function errText(r){var p=r.split(/\s+/);return p[0]==='ERR'?t('ERR_'+p[1]):r}
 function post(u){return fetch(u,{method:'POST',cache:'no-store'}).then(function(r){return r.text()}).then(function(x){x=x.trim();if(x.indexOf('OK')!==0)throw new Error(errText(x));return x})}
+var panelPort='8080';
+function panelLink(){$('#panel').href='http://'+location.hostname+(panelPort==='80'?'':':'+panelPort)+'/cgi-bin/webui?lang='+lang}
 function applyLang(){
   document.documentElement.lang=lang;
   document.querySelectorAll('[data-i18n]').forEach(function(e){e.textContent=t(e.dataset.i18n)});
   document.querySelectorAll('[data-lang]').forEach(function(b){b.classList.toggle('on',b.dataset.lang===lang)});
-  $('#panel').href='http://'+location.hostname+':8080/cgi-bin/webui?lang='+lang;
+  panelLink();
   $('#heading').textContent=sel?dayName(sel):t('latest');
   if(lastData)render(lastData);
 }
@@ -318,6 +322,7 @@ function load(){
       else if(a[0]==='total')d.total=a;
       else if(a[0]==='day')d.days.push({g:a[1],ev:+a[2],clips:+a[3],snaps:+a[4],bytes:+a[5]});
       else if(a[0]==='event')d.events.push({g:a[1],h:a[2],f:a[3],bytes:+a[4],p:a[5]});
+      else if(a[0]==='panel'&&/^\d+$/.test(a[1])){panelPort=a[1];panelLink()}
     });
     lastData=d;render(d);state('');
   }).catch(function(){state(t('unreachable'),'bad')});

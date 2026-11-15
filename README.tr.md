@@ -27,10 +27,10 @@ kalır: **kendi** kameranızdan aldığınız kopya üzerinden yamalanır, kulla
 
 Ayrıca:
 
-- **Kontrol paneli** (`:8080`): canlı önizleme, basılı tutunca dönen PTZ, dört kayıtlı kamera konumu, tek
+- **Kontrol paneli** (temel hack'in web portunda: `:8080` ya da `:80`): canlı önizleme, basılı tutunca dönen PTZ, dört kayıtlı kamera konumu, tek
   düğmeyle beyaz ışık ve IR, gündüz / gece / otomatik (yalnız çalışan modu değil seçimi de gösterir), keskinlik
   hazır ayarları, durum (yamalı mı stok mu, bulut engeli, WiFi, SD,
-  RAM, CPU, son hareket), günlükler ve stok yazılımın gece yeniden başlatması için bir anahtar (aşağıya bakın).
+  RAM, CPU, son hareket), günlükler, stok yazılımın gece yeniden başlatması için bir anahtar ve kamera saati (aşağıya bakın).
   Komutlar yalnız POST ile gider: sayfayı yenilemek ya da geri yüklenen
   sekme komutu tekrar çalıştırmaz. İngilizce ve Türkçe (başlıktaki EN/TR anahtarı; galeri
   panelin seçimini izler).
@@ -67,7 +67,7 @@ güç verilir
      │    └─ devParam/extraParam/osdParam ve _bak kopyalarını RAM'de tutar: üreticinin kayıtları flash'a gitmez
      ├─ sensor.sh → minihack.sh (temel hack: WiFi, telnet, FTP, httpd)
      └─ p2pcam (yamalı)
-health.sh  T+0 plus.sh (panel, galeri, hareket servisi, 6 saatte bir saat eşitleme, fabrika test döngüsünü durdurur)
+health.sh  T+0 plus.sh (panel, galeri, hareket servisi, router'dan saat, fabrika test döngüsünü durdurur)
            T+5 dk  sağlıklıysa yükleyiciyi geri koyar; art arda 3 başarısız açılış → stokta kalır
            T+30 dk hâlâ sağlıklıysa başarısızlık sayaçlarını siler
 ```
@@ -93,7 +93,8 @@ değiştirmek kamerayı stoğa düşürmez.
 ## Kurulum
 
 1. Temel hack'in kalıcı sürümünü [Jalecom'un README'sindeki](https://github.com/Jalecom/AJ_HC1703L_Teardown) gibi kurun. Telnet, FTP ve
-   `http://<kamera>:8080` çalışıyor mu kontrol edin.
+   `http://<kamera>:8080` çalışıyor mu kontrol edin. Bazı kameralarda adres `http://<kamera>/` olur: temel hack
+   80, 8080 ve 8090 arasından ilk boş portu alır.
 2. Kameradan `/bak/p2pcam.sqfs` dosyasını bilgisayarınıza alın (FTP).
 3. Derleyin: `patcher/build.sh p2pcam.sqfs out/`. Yamalı `p2pcam` md5 değeri, [Uyumluluk](#uyumluluk)
    bölümünde sizin firmware sürümünüzün satırındakiyle aynı olmalı.
@@ -115,8 +116,19 @@ yapılmıyor olması gerekir. Varsayılan olarak açıktır. Paneldeki Bakım ka
 `clean/NOREBOOT` yazılır. Ayar hemen ve her yamalı açılışta yeniden uygulanır. Stok açılışta yeniden başlatma hep
 açık kalır; böylece stoğa düşen bir kamera ertesi gece yamalı sürüme geri döner. Flash'a hiçbir şey yazılmaz.
 
-Temel hack saati açılışta bir kez ayarlar. Yeniden başlatma kapalıyken saat kaymasın diye `clock.sh` saati 6 saatte
-bir varsayılan ağ geçidinden (router) eşitler; bulut engeli açıkken ulaşılabilen tek zaman sunucusu odur.
+## Saat
+
+Kamerada pilli saat yok. Ne temel hack ne de stok yazılım bulut olmadan saati ayarlıyor, bu yüzden yeniden
+başlatmadan sonra saat 1970'ten başlar. Plus saati iki yoldan biriyle ayarlar; seçim paneldeki Bakım kartındadır:
+
+- **Otomatik** (varsayılan): `clock.sh` açılışta varsayılan ağ geçidine (router) NTP ile sorar. Yanıt gelene kadar
+  30 sn'de bir dener (en çok 10 dakika), sonra 6 saatte bir sorar. Bulut engeli açıkken kameranın ulaşabildiği tek
+  zaman sunucusu router'dır. Router yanıt vermezse panel, açıldığında saati tarayıcınızdan ayarlar.
+- **Elle**: tarihi ve saati panelde siz girersiniz; saati başka hiçbir şey değiştirmez. Yeniden başlatmadan sonra
+  tekrar girin.
+
+"Bu tarayıcının saatini kullan" iki modda da çalışır. Durum kartı saatin nereden geldiğini gösterir. Flash'a hiçbir
+şey yazılmaz; seçim `clean/clock.conf` içinde saklanır.
 
 ## Kurtarma
 

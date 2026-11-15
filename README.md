@@ -27,9 +27,9 @@ patched from **your own** copy of the firmware, and everything you interact with
 
 Plus also adds:
 
-- **Control panel** on `:8080`: live preview, press-and-hold PTZ, four saved camera positions, one-button
+- **Control panel** on the base hack's web port (`:8080` or `:80`): live preview, press-and-hold PTZ, four saved camera positions, one-button
   white light and IR, day / night / auto (showing what is selected, not only what runs), sharpness presets, status (patched or stock, cloud block, Wi-Fi, SD, RAM, CPU, last motion), logs,
-  and a switch for the stock firmware's nightly restart (see below).
+  a switch for the stock firmware's nightly restart and the camera clock (see below).
   Commands are POST-only, so reloading the page or restoring a tab never re-runs a command. English and
   Turkish (EN/TR switch in the header; the gallery follows the panel's choice).
 - **Recordings gallery** on `:8090`: motion events as cards (snapshot + clip), per-day view, in-browser
@@ -65,7 +65,7 @@ power on
      │    └─ keeps devParam/extraParam/osdParam and their _bak copies in RAM, so vendor saves stay off flash
      ├─ sensor.sh → minihack.sh (base hack: Wi-Fi, telnet, FTP, httpd)
      └─ p2pcam (patched)
-health.sh  T+0 plus.sh (panel, gallery, motion service, clock re-sync every 6 h, stops the factory test loop)
+health.sh  T+0 plus.sh (panel, gallery, motion service, clock from the router, stops the factory test loop)
            T+5 min  healthy → put the loader back; 3 failed boots in a row → stays stock
            T+30 min still healthy → clear the failure counters
 ```
@@ -91,7 +91,8 @@ in a row do not drop the camera to stock.
 ## Install
 
 1. Install the base hack's permanent version as described in [Jalecom's README](https://github.com/Jalecom/AJ_HC1703L_Teardown).
-   Check that telnet, FTP and `http://<camera>:8080` work.
+   Check that telnet, FTP and the base hack's web page work (`http://<camera>:8080`, or `http://<camera>/` on
+   some cameras: the base hack takes the first free port of 80, 8080 and 8090).
 2. Copy `/bak/p2pcam.sqfs` from the camera to your computer (FTP).
 3. Build: `patcher/build.sh p2pcam.sqfs out/`. The patched `p2pcam` md5 must match your firmware's line in
    [Compatibility](#compatibility).
@@ -112,8 +113,18 @@ It is on by default. **Off** in the panel's Maintenance card writes `clean/NOREB
 once and again on every patched boot. A stock boot always keeps the restart on, so a camera that fell back to stock
 gets the patched build back the next night. Nothing is written to flash.
 
-The base hack sets the clock once at boot. So that the clock does not drift with the restart off, `clock.sh`
-re-syncs it every 6 hours from the default gateway (the router), the only time server the cloud block leaves.
+## Clock
+
+The camera has no battery clock, and neither the base hack nor the stock firmware sets the time without the cloud,
+so after a restart the clock starts at 1970. Plus sets it in one of two ways, chosen in the panel's Maintenance card:
+
+- **Automatic** (default): `clock.sh` asks the default gateway (your router) over NTP at boot, every 30 s until it
+  answers (for up to 10 minutes), then every 6 hours. With the cloud block in place the router is the only time server
+  the camera can reach. If the router does not answer, the panel sets the clock from your browser when you open it.
+- **Manual**: you set the date and time in the panel; nothing else changes the clock. Set it again after a restart.
+
+"Use this browser's time" works in both modes. The Status card shows where the time came from. Nothing is written to
+flash; the choice is kept in `clean/clock.conf`.
 
 ## Recovery
 

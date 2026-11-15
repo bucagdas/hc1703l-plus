@@ -224,7 +224,8 @@ person threshold from `motion_level` at start-up. The panel uses `mdcfg live` an
 
 Also on every boot: `devParam.dat(_bak)`, `extraParam.dat(_bak)` and `osdParam.dat(_bak)` are RAM copies, because
 every vendor save rewrites the `_bak` file too. `plus.sh` stops the stock factory test loop `auto_test.sh` and
-starts `clock.sh` (NTP from the default gateway every 6 h).
+starts `clock.sh` (NTP from the default gateway at boot, then every 6 h; skipped when `clean/clock.conf` says
+`clock=manual`).
 
 ## Sound
 

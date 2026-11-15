@@ -15,6 +15,8 @@
 #   GET  webui?s=listen             live microphone: raw 8 kHz A-law from the RTSP audio track (clean/bin/snd)
 #   POST webui?c=chime              play the test chime;  POST webui?c=speak (body: 8 kHz A-law WAV, <= 30 s)
 #   POST webui?c=day_retest          let auto mode re-check daylight now (/tmp/forceday)
+#   POST webui?c=clock_set&v=EPOCH[.m]   set the camera clock (UTC seconds; .m = typed by hand, else from the browser)
+#   POST webui?c=clock_auto|clock_manual  clock source: router NTP + browser (default) or by hand only (clean/clock.conf)
 #                                   c= arriving by GET is IGNORED: a reload or restored tab never runs a command.
 # Light, IR and PTZ commands are the same lines as in the original webui.
 R=/tmp/mnt/mmc01/0
@@ -168,6 +170,26 @@ nightly_set(){
     [ -n "$pid" ] && tool && /tmp/mdcfg reboot "$pid" "$1" >/dev/null 2>&1 && ok=1
   fi
   if [ -n "$ok" ]; then echo "OK nightly_live"; else echo "OK nightly_saved"; fi
+}
+# Clock. The camera has no battery clock and the base hack does not set it; clock.sh asks the router over NTP.
+# "Automatic" (default): the router, and the panel fills in from the browser when the router does not answer.
+# "Manual": clean/clock.conf clock=manual; clock.sh leaves the clock alone and the time is set here by hand.
+clock_set(){
+  e=${v%%.*}
+  case "$e" in ''|*[!0-9]*) echo "ERR invalid"; return 1 ;; esac
+  # 2020-01-01 .. 2038-01-19 (the camera's clock and shell arithmetic are 32 bit)
+  [ ${#e} -eq 10 ] && [ "$e" -ge 1577836800 ] && [ "$e" -lt 2147483647 ] || { echo "ERR invalid"; return 1; }
+  date -u -s "@$e" >/dev/null 2>&1 || { echo "ERR clock"; return 1; }
+  case "$v" in *.m) echo manual ;; *) echo browser ;; esac > /tmp/clock.src
+  echo "OK clock_done"
+}
+clock_mode(){
+  [ -d $C ] || { echo "ERR no_sd"; return 1; }
+  if [ "$1" = manual ]; then echo "clock=manual" > $C/clock.conf; else rm -f $C/clock.conf; fi
+  sync
+  [ -f $C/clock.conf ] && m=manual || m=auto
+  [ "$m" = "$1" ] || { echo "ERR sd_write"; return 1; }
+  echo "OK md_saved"
 }
 # Camera settings live in clean/cam.conf (keys in tools/mdcfg.c). debug_cmd.sh applies them to RAM copies at boot;
 # mdcfg live applies what p2pcam re-reads. Night picture, continuous recording, time stamp and turn need a boot.
@@ -330,6 +352,9 @@ command(){
     day_retest)   touch /tmp/forceday; sleep 2; rm -f /tmp/forceday; echo "OK day_retest"; return ;;
     nightly_on)   nightly_set 1; return ;;
     nightly_off)  nightly_set 0; return ;;
+    clock_set)    clock_set; return ;;
+    clock_auto)   clock_mode auto; return ;;
+    clock_manual) clock_mode manual; return ;;
     reboot) ready_for_reboot
             ( sleep 1; sync; reboot ) </dev/null >/dev/null 2>&1 &
             echo "OK rebooting"; return ;;
@@ -340,6 +365,9 @@ command(){
 
 status(){
   echo "time=$(date '+%Y-%m-%d %H:%M:%S')"
+  echo "epoch=$(date +%s)"
+  grep -q '^clock=manual' $C/clock.conf 2>/dev/null && echo "clock=manual" || echo "clock=auto"
+  echo "clock_src=$(cat /tmp/clock.src 2>/dev/null)"
   read up _ < /proc/uptime; echo "uptime=${up%%.*}"
   [ -f /tmp/p2pcam.clean.sqfs ] && echo "build=patched" || echo "build=stock"
   if [ -f $C/DISABLE ]; then echo "next=stock_disabled"
@@ -511,6 +539,8 @@ dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 dd.good{color:var(--good)} dd.bad{color:var(--bad)}
 input[readonly]{font:12px ui-monospace,Menlo,monospace;width:100%;min-width:0;min-height:40px;padding:0 10px;border:1px solid var(--btnline);border-radius:10px;background:var(--bg);color:var(--fg)}
 .copy{display:flex;flex-wrap:wrap;gap:8px}
+.clockset{display:flex;flex-wrap:wrap;gap:8px}
+.clockset input{flex:1 1 210px;min-width:0;min-height:40px;padding:0 10px;font:inherit;border:1px solid var(--btnline);border-radius:10px;background:var(--bg);color:var(--fg)}
 .copy input{flex:1 1 250px;min-width:0}
 a{color:var(--accent)}
 a.btnlink{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;min-height:40px;padding:0 14px;border:1px solid var(--btnline);border-radius:10px;color:var(--fg);text-decoration:none;font-size:14px}
@@ -667,6 +697,19 @@ body>footer{max-width:1240px;margin:0 auto;padding:0 16px 24px;font-size:12px;co
           </div>
           <p class="hint" data-i18n="nightly_note">Once a night between 02:00 and 04:00.</p>
           <p class="hint" id="nightly_wait" data-i18n="nightly_wait" hidden></p>
+        </div>
+        <div class="set">
+          <div class="lab" data-i18n="clock_title">Clock</div>
+          <div class="seg" role="group" data-i18n-label="clock_title">
+            <button type="button" data-clock="auto" data-i18n="clock_auto">Automatic</button>
+            <button type="button" data-clock="manual" data-i18n="clock_manual">Manual</button>
+          </div>
+          <p class="hint" id="clock_note"></p>
+          <div class="clockset">
+            <input type="datetime-local" id="clock_in" step="1" data-i18n-label="clock_title">
+            <button type="button" id="clock_go" data-i18n="clock_go">Set</button>
+            <button type="button" id="clock_now" data-i18n="clock_now">Use this browser's time</button>
+          </div>
         </div>
         <pre id="logs" hidden></pre>
       </div>
@@ -866,6 +909,10 @@ en:{reading:'Reading status…',live:'Live preview',preview_alt:'Camera preview'
  nightly_title:'Nightly restart',nightly_note:'The stock firmware restarts once a night between 02:00 and 04:00, after about 22 hours of uptime and only while nothing is being recorded. A stock boot always keeps it on.',
  nightly_wait:'Off is saved. This boot runs the stock firmware, so the restart stays on until the next patched boot.',nightly_live:'saved and applied',nightly_saved:'saved, applies on the next patched boot',
  k_nightly:'Nightly restart',v_nightly_on:'On, next around {0}',v_nightly_off:'Off',
+ clock_title:'Clock',clock_auto:'Automatic',clock_manual:'Manual',clock_go:'Set',clock_now:'Use this browser\'s time',clock_done:'clock set',ERR_clock:'the camera did not accept the time',
+ clock_note_auto:'The camera asks your router for the time at boot and every 6 hours. If the router does not answer, this panel sets the clock from your browser when you open it.',
+ clock_note_manual:'Only the time you set here is used. The camera has no battery clock, so set it again after each restart.',
+ src_ntp:'from the router',src_browser:'from a browser',src_manual:'set by hand',src_none:'not set',clock_synced:'Camera clock set from this browser.',
  cam_title:'Camera settings',cam_nightview:'Night picture',nc0:'Infrared',nc1:'Colour + motion',nc2:'Colour',
  cam_night:'Switch to night',cam_day:'Back to day',earlier:'Earlier',dflt:'Default',later:'Later',cam_hourly:'Hourly day check',retest:'Check now',
  cam_person:'Person detection',p0:'Auto',p70:'Strict',p40:'Medium',p10:'Loose',cam_rec:'SD recording',r1:'Motion events',r2:'Continuous',
@@ -900,6 +947,10 @@ tr:{reading:'Durum okunuyor…',live:'Canlı önizleme',preview_alt:'Kamera öni
  nightly_title:'Gece yeniden başlatma',nightly_note:'Stok yazılım kamerayı her gece 02:00–04:00 arasında bir kez yeniden başlatır: yaklaşık 22 saatlik çalışmadan sonra ve kayıt yokken. Stok açılışta hep açık kalır.',
  nightly_wait:'Kapalı ayarı kaydedildi. Bu açılış stok yazılımla yapıldığı için yeniden başlatma, sonraki yamalı açılışa kadar açık kalır.',nightly_live:'kaydedildi ve uygulandı',nightly_saved:'kaydedildi, sonraki yamalı açılışta uygulanır',
  k_nightly:'Gece yeniden başlatma',v_nightly_on:'Açık, sıradaki yaklaşık {0}',v_nightly_off:'Kapalı',
+ clock_title:'Saat',clock_auto:'Otomatik',clock_manual:'Elle',clock_go:'Ayarla',clock_now:'Bu tarayıcının saatini kullan',clock_done:'saat ayarlandı',ERR_clock:'kamera saati kabul etmedi',
+ clock_note_auto:'Kamera saati açılışta ve 6 saatte bir yönlendiriciden alır. Yönlendirici yanıt vermezse bu panel, açıldığında saati tarayıcınızdan ayarlar.',
+ clock_note_manual:'Yalnız burada girdiğiniz saat kullanılır. Kamerada pilli saat yok; her yeniden başlatmadan sonra yeniden ayarlayın.',
+ src_ntp:'yönlendiriciden',src_browser:'tarayıcıdan',src_manual:'elle',src_none:'ayarlanmadı',clock_synced:'Kamera saati bu tarayıcıdan ayarlandı.',
  cam_title:'Kamera ayarları',cam_nightview:'Gece görüntüsü',nc0:'Kızılötesi',nc1:'Renkli + hareket',nc2:'Renkli',
  cam_night:'Geceye geçiş',cam_day:'Gündüze dönüş',earlier:'Erken',dflt:'Varsayılan',later:'Geç',cam_hourly:'Saat başı gündüz denemesi',retest:'Şimdi dene',
  cam_person:'Kişi algılama',p0:'Otomatik',p70:'Sıkı',p40:'Orta',p10:'Gevşek',cam_rec:'SD kayıt',r1:'Hareket olayları',r2:'Sürekli',
@@ -965,6 +1016,31 @@ document.querySelectorAll('button[data-nightly]').forEach(function(b){b.onclick=
   var name=t('nightly_title');
   msg(t('sending',name));
   send(b.dataset.nightly==='1'?'nightly_on':'nightly_off').then(function(r){var x=reply(r);msg(name+': '+x[0],x[1]);status()},function(){msg(t('neterr',name),'bad')});
+}});
+
+// Clock. Automatic: when the router gave no time, the panel sets it from this browser (once per page load).
+var clockMode=null,clockTried=false;
+function pad(n){return (n<10?'0':'')+n}
+function localInput(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())}
+function clockUi(v){
+  clockMode=v.clock||'auto';
+  document.querySelectorAll('button[data-clock]').forEach(function(b){b.classList.toggle('on',b.dataset.clock===clockMode)});
+  $('#clock_note').textContent=t(clockMode==='manual'?'clock_note_manual':'clock_note_auto');
+  var inp=$('#clock_in');if(!inp.value&&document.activeElement!==inp)inp.value=localInput(new Date());
+  if(clockTried||clockMode!=='auto'||!v.epoch||/^ntp/.test(v.clock_src||''))return;
+  if(Math.abs(Date.now()/1000-v.epoch)<=60)return;
+  clockTried=true;
+  send('clock_set&v='+Math.round(Date.now()/1000)).then(function(r){if(r.indexOf('OK')===0){msg(t('clock_synced'),'good');status()}},function(){});
+}
+function clockSet(sec,hand){
+  var name=t('clock_title');msg(t('sending',name));
+  send('clock_set&v='+sec+(hand?'.m':'')).then(function(r){var x=reply(r);msg(name+': '+x[0],x[1]);status()},function(){msg(t('neterr',name),'bad')});
+}
+$('#clock_now').onclick=function(){$('#clock_in').value=localInput(new Date());clockSet(Math.round(Date.now()/1000),false)};
+$('#clock_go').onclick=function(){var d=new Date($('#clock_in').value);if(isNaN(d)){msg(t('ERR_invalid'),'bad');return}clockSet(Math.round(d/1000),true)};
+document.querySelectorAll('button[data-clock]').forEach(function(b){b.onclick=function(){
+  var name=t('clock_title');msg(t('sending',name));
+  send('clock_'+b.dataset.clock).then(function(r){var x=reply(r);msg(name+': '+x[0],x[1]);status()},function(){msg(t('neterr',name),'bad')});
 }});
 
 // Saved positions. "Save here" arms the next number press.
@@ -1044,7 +1120,9 @@ function render(v){
     case 'cpu':if(v.cpu)add(k,t('v_cpu',v.cpu));break;
     case 'uptime':if(v.uptime){var u=+v.uptime,dd=Math.floor(u/86400),hh=Math.floor(u%86400/3600),mm=Math.floor(u%3600/60);add(k,(dd?dd+' '+t('d')+' ':'')+hh+' '+t('h')+' '+mm+' '+t('min'))}break;
     case 'nightly':if(nl){if(nl[0]==='0')add(k,t('v_nightly_off'));else{var nx=nextNightly(v,+nl[1]);add(k,nx?t('v_nightly_on',nx):t('on'))}}break;
-    case 'time':if(v.time)add(k,v.time);break;
+    case 'time':if(v.time){var unset=+v.epoch<1577836800,src=(v.clock_src||'').split(' ')[0];
+      var sl=unset?'src_none':{ntp:'src_ntp',browser:'src_browser',manual:'src_manual'}[src];
+      add(k,sl?v.time+' · '+t(sl):v.time,unset?'bad':'')}break;
     case 'hack':if(v.hack)add(k,t('v_persistent'));break;
     case 'bootlog':if(v.bootlog)add(k,v.bootlog);break;
     }
@@ -1057,6 +1135,7 @@ function render(v){
   var nc=v.nightly_cfg||(nl&&nl[0]);
   document.querySelectorAll('button[data-nightly]').forEach(function(b){b.classList.toggle('on',b.dataset.nightly===nc)});
   $('#nightly_wait').hidden=!(nc==='0'&&nl&&nl[0]==='1');
+  clockUi(v);
   var picked={'0':'auto','1':'day','2':'night'}[v.image]||v.mode;
   document.querySelectorAll('button[data-mode]').forEach(function(b){b.classList.toggle('on',b.dataset.mode===picked)});
   $('#badge').textContent=(v.build==='patched'?t('v_next_patched'):(lang==='tr'?'Stok':'Stock'))+' · '+modeName(v)+' · '+(v.time||'');
